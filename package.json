@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "inkjs": "^2.3.2",
+    "inklecate": "^1.8.1"
+  }
+}
