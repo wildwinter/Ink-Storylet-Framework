@@ -4,11 +4,11 @@ A simple **storylet** framework for Ink.
 
 See my medium post - [over here](https://wildwinter.medium.com/an-ink-unity-storylet-framework-3b2cc0910b3) - for the general principles of the framework.
 
-There are two versions of the framework:
+There are now three versions of the framework:
 
 1. The original Unity version, which can be found in the `unity` directory.
-2. The TypeScript (Browser) version, which can be found in the `typescript-browser` directory.
-3. The TypeScript (Node.js) version, which can be found in the `typescript-node` directory.
+2. The TypeScript (Browser) version, which can be found in the `browser` directory.
+3. The TypeScript (Node.js) version, which can be found in the `node` directory.
 
 ## What is a Storylet System?
 
@@ -54,7 +54,7 @@ This function determines if the storylet is available. It can return:
 
 ## Usage: TypeScript (Web)
 
-The TypeScript implementation is designed for the web. It runs the storylet selection logic in a **Web Worker** to prevent blocking the main thread (UI) during complex storylet evaluations.
+The TypeScript implementation found in the `./browser` directory is designed for the web. It runs the storylet selection logic in a **Web Worker** to prevent blocking the main thread (UI) during complex storylet evaluations.
 
 ### Installation
 
@@ -114,7 +114,7 @@ if (knotName) {
 
 ## Usage: Node.js
 
-The `typescript-node` directory contains a specialized implementation for Node.js using `worker_threads`.
+The `node` directory contains a specialized implementation for Node.js using `worker_threads`.
 
 ```javascript
 const { Story } = require('inkjs');
