@@ -1,125 +1,130 @@
 import { Story } from 'inkjs';
 import { StoryletManager } from '../src/StoryletManager';
 import storyContent from '../../ink/test.ink.json';
+import * as readline from 'readline';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const logEl = document.getElementById('log')!;
-const statusEl = document.getElementById('status')!;
-const storyTextEl = document.getElementById('story-text')!;
-const storyChoicesEl = document.getElementById('story-choices')!;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Create readline interface
+const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+});
 
 function log(msg: string, type: 'info' | 'error' | 'success' = 'info') {
-    const d = document.createElement('div');
-    d.className = `log-entry ${type}`;
-    d.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-    logEl.prepend(d);
-    console.log(msg);
+    const time = new Date().toLocaleTimeString();
+    const color = type === 'error' ? '\x1b[31m' : type === 'success' ? '\x1b[32m' : '\x1b[36m';
+    const reset = '\x1b[0m';
+    console.log(`${color}[${time}] ${msg}${reset}`);
 }
 
-let manager: StoryletManager | null = null;
-// @ts-ignore
-const story = new Story(storyContent);
-
-function init() {
+async function main() {
     try {
         log('Initializing StoryletManager...', 'info');
 
-        const workerUrl = new URL('../src/StoryletWorker.ts', import.meta.url).href;
+        // Verify the ink story loads
+        // @ts-ignore
+        const story = new Story(storyContent);
 
-        manager = new StoryletManager(story, storyContent, workerUrl);
+        // Point to the BUILT worker because Node's Worker thread needs a JS file.
+        // We use the CJS build for maximum compatibility in this test, 
+        // though ES build might work if configured with type:module.
+        // Going up from node/test-harness/main.ts -> node/test-harness -> node -> build/cjs/StoryletWorker.js
+        const workerPath = path.resolve(__dirname, '../build/cjs/StoryletWorker.js');
 
-        // Test addStorylets
-        log('Scanning and adding storylets with prefix "story_"...', 'info');
-        manager.addStorylets("story_");
+        log(`Worker Path: ${workerPath}`, 'info');
+
+        const manager = new StoryletManager(story, storyContent, workerPath);
 
         manager.onRefreshComplete = () => {
             log('Refresh Complete! Playable storylets available.', 'success');
-            statusEl.textContent = 'Status: Ready';
-            updatePlayableList();
+            const hand = manager.getPlayableStorylets();
+            if (hand) {
+                console.log('\nPlayable Storylets:', hand);
+            }
+            promptUser(manager, story);
         };
 
+        log('Scanning and adding storylets with prefix "story_"...', 'info');
+        manager.addStorylets("story_");
+
         log('Manager initialized. Auto-refreshing...', 'success');
-        statusEl.textContent = 'Status: Initialized';
         manager.refresh();
 
     } catch (e: any) {
         log(`Error: ${e.message}`, 'error');
+        rl.close();
     }
 }
 
-document.getElementById('btn-init')!.addEventListener('click', init);
+function promptUser(manager: StoryletManager, story: Story) {
+    rl.question('\nOptions: (p)ick storylet, (r)efresh, (q)uit > ', (answer) => {
+        const choice = answer.trim().toLowerCase();
 
-// Auto-run init
-setTimeout(init, 500);
+        if (choice === 'q') {
+            log('Exiting...', 'info');
+            manager.terminate();
+            rl.close();
+            process.exit(0);
+        } else if (choice === 'r') {
+            log('Requesting Refresh...', 'info');
+            manager.refresh(); // This will trigger onRefreshComplete again
+        } else if (choice === 'p') {
+            if (!manager.isReady) {
+                log('Manager not ready.', 'error');
+                promptUser(manager, story);
+                return;
+            }
 
-document.getElementById('btn-refresh')!.addEventListener('click', () => {
-    if (!manager) return log('Manager not initialized', 'error');
+            const picked = manager.pickPlayableStorylet();
+            if (picked) {
+                log(`Picked storylet: ${picked}`, 'success');
+                playStorylet(picked, story, manager);
+            } else {
+                log('No playable storylets found.', 'info');
+                promptUser(manager, story);
+            }
+        } else {
+            promptUser(manager, story);
+        }
+    });
+}
 
-    log('Requesting Refresh...', 'info');
-    statusEl.textContent = 'Status: Refreshing...';
-    manager.refresh();
-});
-
-document.getElementById('btn-pick')!.addEventListener('click', () => {
-    if (!manager) return log('Manager not initialized', 'error');
-    if (!manager.isReady) return log('Manager not ready (refresh pending)', 'error');
-
-    const picked = manager.pickPlayableStorylet();
-    if (picked) {
-        log(`Picked storylet: ${picked}`, 'success');
-        playStorylet(picked);
-    } else {
-        log('No playable storylets found.', 'info');
-    }
-});
-
-function playStorylet(knotID: string) {
-    statusEl.textContent = `Playing: ${knotID}`;
-    storyTextEl.textContent = '';
-    storyChoicesEl.innerHTML = '';
-
-    // Jump to the storylet
+function playStorylet(knotID: string, story: Story, manager: StoryletManager) {
+    console.log(`\n--- Playing: ${knotID} ---`);
     story.ChoosePathString(knotID);
-
-    continueStory();
+    continueStory(story, manager);
 }
 
-function continueStory() {
+function continueStory(story: Story, manager: StoryletManager) {
     while (story.canContinue) {
         const text = story.Continue();
-        const p = document.createElement('div');
-        p.textContent = text;
-        storyTextEl.appendChild(p);
+        console.log(text?.trim());
     }
 
     if (story.currentChoices.length > 0) {
-        story.currentChoices.forEach((choice: any) => {
-            const btn = document.createElement('button');
-            btn.textContent = choice.text;
-            btn.onclick = () => {
-                story.ChooseChoiceIndex(choice.index);
-                storyChoicesEl.innerHTML = ''; // clear choices
-                continueStory();
-            };
-            storyChoicesEl.appendChild(btn);
+        console.log('\nChoices:');
+        story.currentChoices.forEach((choice, index) => {
+            console.log(`${index + 1}. ${choice.text}`);
+        });
+
+        rl.question('> ', (answer) => {
+            const idx = parseInt(answer) - 1;
+            if (idx >= 0 && idx < story.currentChoices.length) {
+                story.ChooseChoiceIndex(idx);
+                continueStory(story, manager);
+            } else {
+                console.log('Invalid choice.');
+                continueStory(story, manager); // ask again
+            }
         });
     } else {
-        log("Storylet finished. Refreshing...", 'info');
-        statusEl.textContent = 'Status: Refreshing...';
-        if (manager) manager.refresh();
+        log("Storylet finished.", 'info');
+        // Auto-refresh after play
+        manager.refresh();
     }
 }
 
-document.getElementById('btn-reset')!.addEventListener('click', () => {
-    if (!manager) return log('Manager not initialized', 'error');
-    manager.reset();
-    log('Reset complete.', 'info');
-    statusEl.textContent = 'Status: Reset';
-});
-
-function updatePlayableList() {
-    if (!manager || !manager.isReady) return;
-    const list = manager.getPlayableStorylets();
-    log(`Playable Storylets: [${list?.join(', ')}]`, 'info');
-}
-
-log('Test Harness Loaded. Click Initialize to start.', 'info');
+main();
