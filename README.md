@@ -141,7 +141,7 @@ manager.refresh();
 
 The Unity version runs synchronously on the main thread.
 
-### Setup
+### Unity Setup
 
 ```csharp
 using InkStoryletFramework;
