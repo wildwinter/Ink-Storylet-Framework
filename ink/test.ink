@@ -22,6 +22,7 @@ in the Troll Army, and ask for sanctuary.
 === function _story_rainy_day() ===
 ~ return true
 === story_rainy_day ===
+#once
 It's a surprisingly rainy day, the sort of day that only happens 
 once a century.
 -> DONE

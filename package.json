@@ -1,6 +1,24 @@
 {
-  "dependencies": {
-    "inkjs": "^2.3.2",
-    "inklecate": "^1.8.1"
+  "name": "ink-storylet-framework",
+  "version": "0.0.2",
+  "description": "A simple storylet framework for Ink.",
+  "scripts": {
+    "build-unity": "cd unity && npm run build",
+    "build-browser": "cd browser && npm run build",
+    "build-node": "cd node && npm run build",
+    "build": "npm run build-browser && npm run build-node && npm run build-unity",
+    "dist": "npm run build && rm -rf dist/v$npm_package_version && mkdir -p dist/v$npm_package_version && zip -r dist/v$npm_package_version/$npm_package_name-browser-v$npm_package_version.zip ./browser/build && zip -r dist/v$npm_package_version/$npm_package_name-node-v$npm_package_version.zip ./node/build && zip -r dist/v$npm_package_version/$npm_package_name-unity-v$npm_package_version.zip ./unity/build"
+  },
+  "keywords": [
+    "ink",
+    "storylet",
+    "framework"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.3.3",
+    "vite": "^7.3.1"
   }
 }

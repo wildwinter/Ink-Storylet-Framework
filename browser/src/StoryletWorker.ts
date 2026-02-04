@@ -7,7 +7,10 @@ export type WorkerMessage =
     | { type: 'REFRESH', stateJson: string }
     | { type: 'MARK_PLAYED', knotID: string }
     | { type: 'RESET' }
-    | { type: 'LOAD_DATABOLT', json: string }; // Custom load for the manager state
+    | { type: 'RESET' }
+    | { type: 'LOAD_DATABOLT', json: string } // Custom load for the manager state
+    | { type: 'SAVE_DATABOLT' };
+
 
 export type WorkerResponse =
     | { type: 'ERROR', message: string }
@@ -53,6 +56,9 @@ self.onmessage = (event: MessageEvent<WorkerMessage>) => {
                 break;
             case 'LOAD_DATABOLT':
                 handleLoad(msg.json);
+                break;
+            case 'SAVE_DATABOLT':
+                handleSave();
                 break;
         }
     } catch (err: any) {
@@ -221,12 +227,13 @@ function getAllKnotIDs(story: Story): string[] {
 // though the original class had SaveAsJson. 
 // I'll add a listener for it if needed, but for now I've implemented LOAD.
 // Let's add SAVE support to be complete.
-self.addEventListener('message', (event) => {
-    if (event.data.type === 'SAVE_DATABOLT') {
-        const data: [string, boolean][] = [];
-        for (const s of deck.values()) {
-            data.push([s.knotID, s.played]);
-        }
-        postResponse({ type: 'SAVE_DATABOLT', json: JSON.stringify(data) });
+// Function to handle save request
+function handleSave() {
+    const data: [string, boolean][] = [];
+    for (const s of deck.values()) {
+        data.push([s.knotID, s.played]);
     }
-});
+    postResponse({ type: 'SAVE_DATABOLT', json: JSON.stringify(data) });
+}
+
+// Previous standalone listener removed in favor of integrated switch.

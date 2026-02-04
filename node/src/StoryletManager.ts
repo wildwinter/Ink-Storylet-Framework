@@ -1,7 +1,11 @@
 import { Story } from 'inkjs';
 import type { WorkerMessage, WorkerResponse } from './StoryletWorker';
 
-export class AsyncStoryletManager {
+declare var require: any;
+declare var process: any;
+
+
+export class StoryletManager {
     public onRefreshComplete: (() => void) | null = null;
 
     public get isReady(): boolean {
@@ -17,7 +21,7 @@ export class AsyncStoryletManager {
     }
 
     private _story: Story;
-    private _worker: Worker;
+    private _worker: any; // Node Worker type is dynamic
     private _hand: string[] = [];
     private _handWeighted: string[] = [];
     private _state: State = State.NEEDS_REFRESH;
@@ -26,12 +30,32 @@ export class AsyncStoryletManager {
     constructor(story: Story, storyContentJson: any, workerPath: string = './StoryletWorker.js') {
         this._story = story;
 
-        // Assume standard instantiation. 
-        // Note: The user might need to adjust the path or use new URL() depending on bundler.
-        this._worker = new Worker(workerPath, { type: 'module' });
+        // Node.js environment - Strict dependency on worker_threads
+        // We use dynamic require to avoid bundling issues if this file is looked at by a browser bundler, 
+        // but arguably for a 'node' folder we could just import. 
+        // Let's stick to strict require for safety.
 
+        let Worker;
+        try {
+            Worker = require('worker_threads').Worker;
+        } catch (e) {
+            throw new Error("StoryletManager (Node): 'worker_threads' module not found. Ensure you are running in Node.js.");
+        }
 
-        this._worker.onmessage = this.handleWorkerMessage.bind(this);
+        const worker = new Worker(workerPath);
+
+        // We'll treat _worker as the Node Worker type, but cast to any to avoid complex typings for now.
+        this._worker = worker;
+
+        // Node workers use .on('message'), not .onmessage
+        worker.on('message', (data: any) => {
+            // Simulate MessageEvent structure for our internal handler if needed, 
+            // or just pass data directly and adjust handler. 
+            // Our internal handler expects { data: ... }
+            this.handleWorkerMessage({ data } as MessageEvent);
+        });
+
+        worker.on('error', (err: any) => console.error("Worker Error:", err));
 
         // Initialize worker immediately
         this.postMessage({
@@ -71,7 +95,7 @@ export class AsyncStoryletManager {
             }
         }
 
-        console.log(`[AsyncStoryletManager] Discovered ${discovered.length} storylets:`, discovered);
+        console.log(`[StoryletManager] Discovered ${discovered.length} storylets:`, discovered);
 
         this.postMessage({
             type: 'REGISTER_STORYLETS',
@@ -141,13 +165,21 @@ export class AsyncStoryletManager {
 
     public saveAsJson(): Promise<string> {
         return new Promise((resolve) => {
-            const tempHandler = (e: MessageEvent<WorkerResponse>) => {
-                if (e.data.type === 'SAVE_DATABOLT') {
-                    this._worker.removeEventListener('message', tempHandler);
-                    resolve(e.data.json);
+            const tempHandler = (e: any) => {
+                if (e.type === 'SAVE_DATABOLT') {
+                    this._worker.off('message', tempHandler);
+                    resolve(e.json);
                 }
             };
-            this._worker.addEventListener('message', tempHandler);
+            // Node worker listener needs adapting
+            // The easier path:
+            const nodeHandler = (data: any) => {
+                if (data.type === 'SAVE_DATABOLT') {
+                    this._worker.off('message', nodeHandler);
+                    resolve(data.json);
+                }
+            };
+            this._worker.on('message', nodeHandler);
             this._worker.postMessage({ type: 'SAVE_DATABOLT' });
         });
     }
@@ -178,7 +210,7 @@ export class AsyncStoryletManager {
                 if (this.onRefreshComplete) this.onRefreshComplete();
                 break;
             case 'ERROR':
-                console.error("AsyncStoryletManager Worker Error:", msg.message);
+                console.error("StoryletManager Worker Error:", msg.message);
                 break;
         }
     }
@@ -189,7 +221,7 @@ export class AsyncStoryletManager {
         const mainContentContainer = this._story.mainContentContainer || this._story._mainContentContainer;
 
         if (!mainContentContainer) {
-            console.warn("[AsyncStoryletManager] Could not find mainContentContainer");
+            console.warn("[StoryletManager] Could not find mainContentContainer");
             return knotList;
         }
 
@@ -213,10 +245,10 @@ export class AsyncStoryletManager {
                 }
             }
         } else {
-            console.warn("[AsyncStoryletManager] Could not find namedContent");
+            console.warn("[StoryletManager] Could not find namedContent");
         }
 
-        console.log("[AsyncStoryletManager] All Knot IDs found:", knotList);
+        console.log("[StoryletManager] All Knot IDs found:", knotList);
         return knotList;
     }
 }

@@ -1,6 +1,6 @@
 import { Story } from 'inkjs';
-import { AsyncStoryletManager } from '../typescript/AsyncStoryletManager';
-import storyContent from './test.ink.json';
+import { StoryletManager } from '../src/StoryletManager';
+import storyContent from '../../ink/test.ink.json';
 
 const logEl = document.getElementById('log')!;
 const statusEl = document.getElementById('status')!;
@@ -15,17 +15,17 @@ function log(msg: string, type: 'info' | 'error' | 'success' = 'info') {
     console.log(msg);
 }
 
-let manager: AsyncStoryletManager | null = null;
+let manager: StoryletManager | null = null;
 // @ts-ignore
 const story = new Story(storyContent);
 
 function init() {
     try {
-        log('Initializing AsyncStoryletManager...', 'info');
+        log('Initializing StoryletManager...', 'info');
 
-        const workerUrl = new URL('../typescript/StoryletWorker.ts', import.meta.url).href;
+        const workerUrl = new URL('../src/StoryletWorker.ts', import.meta.url).href;
 
-        manager = new AsyncStoryletManager(story, storyContent, workerUrl);
+        manager = new StoryletManager(story, storyContent, workerUrl);
 
         // Test addStorylets
         log('Scanning and adding storylets with prefix "story_"...', 'info');
