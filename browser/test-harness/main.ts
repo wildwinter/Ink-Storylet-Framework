@@ -25,7 +25,7 @@ function init() {
 
         const workerUrl = new URL('../src/StoryletWorker.ts', import.meta.url).href;
 
-        manager = new StoryletManager(story, storyContent, workerUrl);
+        manager = new StoryletManager(story, workerUrl);
 
         // onRefreshComplete now receives the pool name that just finished refreshing.
         manager.onRefreshComplete = (pool: string) => {

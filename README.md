@@ -111,7 +111,7 @@ import storyContent from './your-story.json';
 const story = new Story(storyContent);
 
 // Initialize Manager (requires path to the worker script)
-const manager = new StoryletManager(story, storyContent, './StoryletWorker.js');
+const manager = new StoryletManager(story, './StoryletWorker.js');
 
 // Register storylets — optionally pass a pool name (defaults to "default")
 manager.addStorylets("story_");
@@ -163,7 +163,7 @@ import { Story } from 'inkjs';
 import { StoryletManager } from './StoryletManager'; // path to compiled JS
 
 const story = new Story(storyContent);
-const manager = new StoryletManager(story, storyContent, './StoryletWorker.js');
+const manager = new StoryletManager(story, './StoryletWorker.js');
 
 // Register storylets — optionally pass a pool name (defaults to "default")
 manager.addStorylets("story_");

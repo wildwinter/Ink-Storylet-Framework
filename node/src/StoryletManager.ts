@@ -20,8 +20,7 @@ export class StoryletManager {
     private _worker: any; // Node Worker type is dynamic
     private _pools: Map<string, PoolState> = new Map();
 
-    // We pass the RAW JSON content for the worker to initialize its own instance
-    constructor(story: Story, storyContentJson: any, workerPath: string = './StoryletWorker.js') {
+    constructor(story: Story, workerPath: string = './StoryletWorker.js') {
         this._story = story;
 
         // Node.js environment - Strict dependency on worker_threads
@@ -48,10 +47,12 @@ export class StoryletManager {
 
         worker.on('error', (err: any) => console.error("Worker Error:", err));
 
-        // Initialize worker immediately
+        // Initialize worker with the story content extracted from the Story instance.
+        // The worker runs on a separate thread and cannot share the Story object directly,
+        // so it uses this JSON to construct its own instance.
         this.postMessage({
             type: 'INIT',
-            storyContent: storyContentJson
+            storyContent: story.ToJson()
         });
     }
 

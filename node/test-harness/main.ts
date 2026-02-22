@@ -36,7 +36,7 @@ async function main() {
 
         log(`Worker Path: ${workerPath}`, 'info');
 
-        const manager = new StoryletManager(story, storyContent, workerPath);
+        const manager = new StoryletManager(story, workerPath);
 
         // onRefreshComplete now receives the pool name that just finished refreshing.
         manager.onRefreshComplete = (pool: string) => {

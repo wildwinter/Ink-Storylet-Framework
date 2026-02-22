@@ -17,8 +17,7 @@ export class StoryletManager {
     private _worker: Worker;
     private _pools: Map<string, PoolState> = new Map();
 
-    // We pass the RAW JSON content for the worker to initialize its own instance
-    constructor(story: Story, storyContentJson: any, workerPath: string = './StoryletWorker.js') {
+    constructor(story: Story, workerPath: string = './StoryletWorker.js') {
         this._story = story;
 
         // Default to null to satisfy TS, though we will assign it below.
@@ -30,10 +29,12 @@ export class StoryletManager {
 
         this._worker.onmessage = this.handleWorkerMessage.bind(this);
 
-        // Initialize worker immediately
+        // Initialize worker with the story content extracted from the Story instance.
+        // The worker runs on a separate thread and cannot share the Story object directly,
+        // so it uses this JSON to construct its own instance.
         this.postMessage({
             type: 'INIT',
-            storyContent: storyContentJson
+            storyContent: story.ToJson()
         });
     }
 
