@@ -52,6 +52,15 @@ This function determines if the storylet is available. It can return:
 
 * `#once`: applied to a knot. If this tag is present, the storylet will be discarded from the deck after it is played successfully. Otherwise, it remains in the deck and can be selected again.
 
+* `#storylets:prefix` / `#storylets:prefix,pool`: applied as a **global tag** (at the very top of an Ink file). Registers a pool of storylets automatically when the `StoryletManager` is created, without any extra code. Multiple tags can be used to register multiple pools.
+
+```ink
+# storylets:story_
+# storylets:encounter_,encounters
+```
+
+This is equivalent to calling `addStorylets("story_")` and `addStorylets("encounter_", "encounters")` in code. You can use whichever approach suits your project — or mix both.
+
 ## Pools
 
 All three implementations support **named pools** — independent groups of storylets that can be registered, queried, and refreshed separately while sharing the same underlying Ink story. This is useful when you have different categories of content that need to be managed independently, e.g. `"encounters"` and `"dialogues"`.
@@ -110,10 +119,12 @@ import storyContent from './your-story.json';
 // Initialize Ink Story
 const story = new Story(storyContent);
 
-// Initialize Manager (requires path to the worker script)
+// Initialize Manager (requires path to the worker script).
+// Any #storylets: global tags in the Ink file are registered automatically.
 const manager = new StoryletManager(story, './StoryletWorker.js');
 
-// Register storylets — optionally pass a pool name (defaults to "default")
+// Optionally register additional storylets in code
+// (not needed if pools are declared via #storylets: global tags)
 manager.addStorylets("story_");
 manager.addStorylets("encounter_", "encounters");
 
@@ -163,9 +174,12 @@ import { Story } from 'inkjs';
 import { StoryletManager } from './StoryletManager'; // path to compiled JS
 
 const story = new Story(storyContent);
+
+// Any #storylets: global tags in the Ink file are registered automatically.
 const manager = new StoryletManager(story, './StoryletWorker.js');
 
-// Register storylets — optionally pass a pool name (defaults to "default")
+// Optionally register additional storylets in code
+// (not needed if pools are declared via #storylets: global tags)
 manager.addStorylets("story_");
 manager.addStorylets("encounter_", "encounters");
 

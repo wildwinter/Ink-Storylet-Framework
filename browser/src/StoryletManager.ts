@@ -36,6 +36,8 @@ export class StoryletManager {
             type: 'INIT',
             storyContent: story.ToJson()
         });
+
+        this.addStoryletsFromGlobalTags();
     }
 
     // --- State accessors ---
@@ -257,6 +259,18 @@ export class StoryletManager {
             case 'ERROR':
                 console.error("StoryletManager Worker Error:", msg.message);
                 break;
+        }
+    }
+
+    private addStoryletsFromGlobalTags(): void {
+        const tags = this._story.globalTags;
+        if (!tags) return;
+        for (const tag of tags) {
+            if (!tag.startsWith('storylets:')) continue;
+            const parts = tag.slice('storylets:'.length).split(',');
+            const prefix = parts[0].trim();
+            const pool = parts.length > 1 ? parts[1].trim() : DEFAULT_POOL;
+            if (prefix) this.addStorylets(prefix, pool);
         }
     }
 
