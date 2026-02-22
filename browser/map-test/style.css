@@ -1,0 +1,162 @@
+html, body {
+    font-family: sans-serif;
+    background: white;
+    color: #000000;
+    padding: 0;
+    margin: 0;
+    box-sizing: border-box;
+}
+
+*, *:before, *:after {
+    box-sizing: inherit;
+}
+
+div {
+    display: block;
+    position: relative;
+}
+
+.outerContainer {
+    padding: 0;
+    margin: 0;
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(480px, 60%) 1fr;
+    height: 100vh;
+}
+
+#column-left {
+    overflow-y: auto;
+}
+
+#column-right {
+    overflow-y: auto;
+}
+
+#story {
+    padding: 10px;
+    height: 100vh;
+    overflow-y: auto;
+    background-color: rgba(255, 255, 255);
+}
+
+#map-container {
+    position: relative;
+    width: 100%;
+    border: 1px solid #ccc;
+}
+
+#map-container.locked::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    cursor: not-allowed;
+}
+
+.map-image {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+.map-hit-area {
+    position: absolute;
+    width: 2.5vw;
+    height: 2.5vw;
+    transform: translate(-50%, -50%);
+    cursor: pointer;
+    z-index: 5;
+}
+
+.map-symbol-visual {
+    width: 12px;
+    height: 12px;
+    background-color: #e63946;
+    border-radius: 50%;
+    border: 2px solid white;
+    box-shadow: 0 0 4px rgba(0,0,0,0.4);
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.map-tooltip {
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 0.3s, visibility 0.3s;
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: #333;
+    color: white;
+    padding: 10px 14px;
+    margin-bottom: 10px;
+    border-radius: 6px;
+    min-width: 160px;
+    max-width: 250px;
+    z-index: 10;
+}
+
+.map-hit-area:hover .map-tooltip {
+    visibility: visible;
+    opacity: 1;
+}
+
+.tooltip-title::before {
+    content: attr(data-title);
+    font-weight: bold;
+    display: block;
+    padding-bottom: 4px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid #555;
+}
+
+.tooltip-description::before {
+    content: attr(data-description);
+    display: block;
+    font-size: 0.9em;
+}
+
+.map-tooltip::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: -6px;
+    transform: translateX(-50%);
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 6px solid #333;
+}
+
+#reset-container {
+    position: absolute;
+    top: 0;
+    right: 0;
+}
+
+#reset-container button {
+    font-size: 12px;
+    font-weight: bold;
+}
+
+ul.choices {
+    list-style: none;
+    padding: 0;
+    margin: 8px 0;
+}
+
+li.choice a {
+    color: #0066cc;
+    text-decoration: none;
+}
+
+li.choice a:hover {
+    text-decoration: underline;
+}

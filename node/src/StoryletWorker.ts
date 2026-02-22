@@ -7,8 +7,8 @@ declare var require: any;
 
 export type WorkerMessage =
     | { type: 'INIT', storyContent: any }
-    | { type: 'REGISTER_STORYLETS', pool: string, storylets: { knotID: string; once: boolean }[] }
-    | { type: 'REFRESH', stateJson: string, pool?: string }  // pool undefined = all pools
+    | { type: 'REGISTER_STORYLETS', pool: string, storylets: { knotID: string; once: boolean; groupPredicate: string | null }[] }
+    | { type: 'REFRESH', stateJson: string, pool?: string, groupOverrides?: Record<string, boolean> }
     | { type: 'MARK_PLAYED', pool: string, knotID: string }
     | { type: 'RESET', pool?: string }                       // pool undefined = all pools
     | { type: 'LOAD_DATABOLT', json: string }
@@ -49,7 +49,7 @@ function handleMessage(msg: WorkerMessage) {
                 handleRegisterStorylets(msg.pool, msg.storylets);
                 break;
             case 'REFRESH':
-                handleRefresh(msg.stateJson, msg.pool);
+                handleRefresh(msg.stateJson, msg.pool, msg.groupOverrides);
                 break;
             case 'MARK_PLAYED':
                 handleMarkPlayed(msg.pool, msg.knotID);
@@ -81,6 +81,7 @@ interface Storylet {
     knotID: string;
     once: boolean;
     played: boolean;
+    groupPredicate: string | null;
 }
 
 let story: Story | null = null;
@@ -100,24 +101,33 @@ function handleInit(storyContent: any) {
     postResponse({ type: 'INIT_COMPLETE' });
 }
 
-function handleRegisterStorylets(pool: string, storylets: { knotID: string; once: boolean }[]) {
+function handleRegisterStorylets(pool: string, storylets: { knotID: string; once: boolean; groupPredicate: string | null }[]) {
     const deck = getOrCreatePool(pool);
     for (const s of storylets) {
         if (!deck.has(s.knotID)) {
             deck.set(s.knotID, {
                 knotID: s.knotID,
                 once: s.once,
-                played: false
+                played: false,
+                groupPredicate: s.groupPredicate
             });
         }
     }
 }
 
-function refreshPool(poolName: string, deck: Map<string, Storylet>): void {
+function refreshPool(poolName: string, deck: Map<string, Storylet>, groupOverrides?: Record<string, boolean>): void {
     const hand: string[] = [];
     const handWeighted: string[] = [];
 
     for (const s of deck.values()) {
+        // Group predicate results were evaluated on the main thread (where external functions
+        // are bound) and passed in as groupOverrides. Skip storylets in inactive groups.
+        const gp = s.groupPredicate;
+        if (gp && groupOverrides) {
+            const groupActive = groupOverrides[gp] ?? true;
+            if (!groupActive) continue;
+        }
+
         if (s.once && s.played) continue;
 
         const funcName = "_" + s.knotID;
@@ -141,16 +151,16 @@ function refreshPool(poolName: string, deck: Map<string, Storylet>): void {
     postResponse({ type: 'REFRESH_COMPLETE', pool: poolName, hand, handWeighted });
 }
 
-function handleRefresh(stateJson: string, pool?: string) {
+function handleRefresh(stateJson: string, pool?: string, groupOverrides?: Record<string, boolean>) {
     if (!story) throw new Error("Worker not initialized with story content.");
 
     story.state.LoadJson(stateJson);
 
     if (pool !== undefined) {
-        refreshPool(pool, getOrCreatePool(pool));
+        refreshPool(pool, getOrCreatePool(pool), groupOverrides);
     } else {
         for (const [poolName, deck] of pools) {
-            refreshPool(poolName, deck);
+            refreshPool(poolName, deck, groupOverrides);
         }
     }
 }

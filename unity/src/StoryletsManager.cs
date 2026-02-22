@@ -19,10 +19,12 @@ namespace InkStoryletFramework
         // with the pool name as the argument.
         public Action<string> OnRefreshComplete;
 
-        // Pass in a loaded Ink Story
+        // Pass in a loaded Ink Story. Any #storylets: global tags in the Ink file
+        // are parsed and registered automatically.
         public StoryletsManager(Story story)
         {
             _story = story;
+            AddStoryletsFromGlobalTags();
         }
 
         // Returns true if the given pool (default: "default") has a completed refresh.
@@ -57,50 +59,54 @@ namespace InkStoryletFramework
             return true;
         }
 
-        // Call with a prefix e.g. "story_" will scan all the
-        // knot IDs in the ink file that start with story_ and treat
-        // them as a story. An optional pool name groups them into
-        // an independently queryable set (defaults to "default").
+        // Discover all knots starting with `name_` and register them into `pool`.
         //
-        // Remember each storylet must also have a function called
-        // the same but with an underscore in front e.g.
-        // a story called story_troll_attack needs a function called
-        // _story_troll_attack()
-        // The function must either return true/false ("is this available?")
-        // or instead can return an integer weighting - the higher the integer,
-        // the more changes that card gets of being picked randomly. (i.e. the more
-        // copies of that card ends up in the current hand of cards!)
+        // The underscore is inferred: AddStorylets("encounters") finds all knots
+        // beginning with "encounters_" and uses "_encounters()" as an optional group
+        // predicate. If that function exists in Ink it is evaluated once per refresh
+        // before any individual storylet predicates in the group — if it returns false
+        // the entire group is skipped.
         //
-        // If a knot has the tag #once
-        // then it will be discarded after
-        // use, otherwise each storylet will
-        // be shuffled back in.
+        // Each storylet knot must have a predicate function _knotID() that returns
+        // bool (available?) or int (weight for random selection).
         //
-        // IMPORTANT: Once you have called all the AddStorylets you need to,
-        // make sure you call Refresh()!
-        public void AddStorylets(string prefix, string pool = DefaultPool)
+        // Tag #once on a knot means that storylet is discarded after its first play.
+        //
+        // IMPORTANT: After calling AddStorylets(), call Refresh() and wait for
+        // OnRefreshComplete before querying the available storylets.
+        public void AddStorylets(string name, string pool = DefaultPool)
         {
+            string prefix = name + "_";
             List<string> knotIDs = GetAllKnotIDs();
             PoolState poolState = GetOrCreatePoolState(pool);
 
+            // Determine group predicate (optional — only used if the function exists)
+            string groupPredFn = "_" + name;
+            string groupPredicate = knotIDs.Contains(groupPredFn) ? groupPredFn : null;
+
             foreach (string knotID in knotIDs)
             {
-                if (knotID.StartsWith(prefix))
-                {
-                    // Using a _ as a prefix for the function
-                    string functionName = "_" + knotID;
-                    if (!knotIDs.Contains(functionName))
-                    {
-                        Debug.LogError($"Can't find test function {functionName} for storylet {knotID}.");
-                        continue;
-                    }
+                if (!knotID.StartsWith(prefix))
+                    continue;
 
-                    Storylet storylet = new(knotID);
-                    poolState.Deck[knotID] = storylet;
-                    List<string> tags = _story.TagsForContentAtPath(knotID);
-                    if (tags != null)
-                        storylet.once = tags.Contains("once");
+                string functionName = "_" + knotID;
+                if (!knotIDs.Contains(functionName))
+                {
+                    Debug.LogError($"Can't find predicate function {functionName} for storylet {knotID}.");
+                    continue;
                 }
+
+                Storylet storylet = new(knotID);
+                storylet.GroupPredicate = groupPredicate;
+                poolState.Deck[knotID] = storylet;
+
+                // Parse and cache all tags for this storylet
+                List<string> tags = _story.TagsForContentAtPath(knotID);
+                Dictionary<string, object> parsedTags = ParseTags(tags);
+                _storyletTags[knotID] = parsedTags;
+
+                if (parsedTags.TryGetValue("once", out object onceVal) && onceVal is bool onceBool)
+                    storylet.once = onceBool;
             }
 
             poolState.State = State.NEEDS_REFRESH;
@@ -119,7 +125,7 @@ namespace InkStoryletFramework
                 PoolState poolState = GetOrCreatePoolState(pool);
                 poolState.Hand.Clear();
                 poolState.HandWeighted.Clear();
-                poolState.RefreshList = new List<Storylet>(poolState.Deck.Values);
+                poolState.RefreshList = BuildRefreshList(poolState);
                 poolState.State = State.REFRESHING;
             }
             else
@@ -128,7 +134,7 @@ namespace InkStoryletFramework
                 {
                     poolState.Hand.Clear();
                     poolState.HandWeighted.Clear();
-                    poolState.RefreshList = new List<Storylet>(poolState.Deck.Values);
+                    poolState.RefreshList = BuildRefreshList(poolState);
                     poolState.State = State.REFRESHING;
                 }
             }
@@ -194,12 +200,24 @@ namespace InkStoryletFramework
 
         // Call this if you use a storylet from the playable list
         // returned by GetPlayableStorylets.
-        public void MarkPlayed(string knotID, string pool = DefaultPool)
+        // If pool is null, all pools are searched (safe — missing knotIDs are ignored).
+        public void MarkPlayed(string knotID, string pool = null)
         {
-            if (_pools.TryGetValue(pool, out PoolState poolState))
+            if (pool != null)
             {
-                if (poolState.Deck.TryGetValue(knotID, out Storylet storylet))
-                    storylet.played = true;
+                if (_pools.TryGetValue(pool, out PoolState poolState))
+                {
+                    if (poolState.Deck.TryGetValue(knotID, out Storylet storylet))
+                        storylet.played = true;
+                }
+            }
+            else
+            {
+                foreach (PoolState poolState in _pools.Values)
+                {
+                    if (poolState.Deck.TryGetValue(knotID, out Storylet storylet))
+                        storylet.played = true;
+                }
             }
         }
 
@@ -222,6 +240,54 @@ namespace InkStoryletFramework
             string knotID = poolState.HandWeighted[i];
             MarkPlayed(knotID, pool);
             return knotID;
+        }
+
+        // Returns the value of a named tag on a storylet knot, or defaultValue if absent.
+        // Tag names are case-insensitive. Values are parsed at registration time:
+        //   - "true"/"false" strings become booleans
+        //   - bare tags (no colon) become true
+        //   - everything else is returned as a trimmed string
+        public object GetStoryletTag(string knotID, string tagName, object defaultValue = null)
+        {
+            if (!_storyletTags.TryGetValue(knotID, out Dictionary<string, object> tags))
+                return defaultValue;
+            string key = tagName.ToLower();
+            return tags.TryGetValue(key, out object val) ? val : defaultValue;
+        }
+
+        // Returns all playable storylets whose tag `tagName` equals `tagValue`.
+        // If pool is provided only that pool is searched; otherwise all pools are searched.
+        public List<string> GetPlayableStoryletsWithTag(string tagName, object tagValue, string pool = null)
+        {
+            string key = tagName.ToLower();
+            List<string> result = new List<string>();
+
+            IEnumerable<PoolState> poolsToSearch = (pool != null)
+                ? (_pools.TryGetValue(pool, out PoolState ps) ? new[] { ps } : Array.Empty<PoolState>())
+                : (IEnumerable<PoolState>)_pools.Values;
+
+            foreach (PoolState poolState in poolsToSearch)
+            {
+                if (poolState.State != State.REFRESH_COMPLETE) continue;
+                foreach (string knotID in poolState.Hand)
+                {
+                    if (_storyletTags.TryGetValue(knotID, out Dictionary<string, object> tags)
+                        && tags.TryGetValue(key, out object val)
+                        && Equals(val, tagValue))
+                    {
+                        result.Add(knotID);
+                    }
+                }
+            }
+            return result;
+        }
+
+        // Returns the first playable storylet whose tag `tagName` equals `tagValue`, or null.
+        // If pool is provided only that pool is searched; otherwise all pools are searched.
+        public string GetFirstPlayableStoryletWithTag(string tagName, object tagValue, string pool = null)
+        {
+            List<string> matches = GetPlayableStoryletsWithTag(tagName, tagValue, pool);
+            return matches.Count > 0 ? matches[0] : null;
         }
 
         // Throw out any played data for a specific pool, or all pools if none
@@ -296,11 +362,31 @@ namespace InkStoryletFramework
         private readonly Story _story;
         private readonly Dictionary<string, PoolState> _pools = new();
 
+        // Tag cache: knotID -> { tagName -> value }
+        private readonly Dictionary<string, Dictionary<string, object>> _storyletTags = new();
+
         private enum State
         {
             NEEDS_REFRESH,
             REFRESHING,
             REFRESH_COMPLETE
+        }
+
+        // Parse #storylets: global tags and call AddStorylets() for each.
+        // Tag format: #storylets:name  or  #storylets:name,poolName
+        private void AddStoryletsFromGlobalTags()
+        {
+            IList<string> globalTags = _story.globalTags;
+            if (globalTags == null) return;
+            foreach (string tag in globalTags)
+            {
+                if (!tag.StartsWith("storylets:")) continue;
+                string[] parts = tag.Substring("storylets:".Length).Split(',');
+                string name = parts[0].Trim();
+                string pool = parts.Length > 1 ? parts[1].Trim() : DefaultPool;
+                if (!string.IsNullOrEmpty(name))
+                    AddStorylets(name, pool);
+            }
         }
 
         private PoolState GetOrCreatePoolState(string pool)
@@ -327,6 +413,45 @@ namespace InkStoryletFramework
             poolState.Hand.Clear();
             poolState.HandWeighted.Clear();
             poolState.State = State.NEEDS_REFRESH;
+        }
+
+        // Evaluate unique group predicates for a pool's deck, then build the refresh
+        // list excluding storylets in inactive groups. Called synchronously in Refresh()
+        // so that external functions bound to the story are accessible.
+        private List<Storylet> BuildRefreshList(PoolState poolState)
+        {
+            // Evaluate each unique group predicate once
+            Dictionary<string, bool> groupResults = new Dictionary<string, bool>();
+            foreach (Storylet storylet in poolState.Deck.Values)
+            {
+                string gp = storylet.GroupPredicate;
+                if (gp != null && !groupResults.ContainsKey(gp))
+                {
+                    bool active = false;
+                    try
+                    {
+                        object retVal = _story.EvaluateFunction(gp);
+                        if (retVal is bool b) active = b;
+                        else if (retVal is int i) active = i > 0;
+                    }
+                    catch (Exception)
+                    {
+                        active = true; // Missing function → group always active
+                    }
+                    groupResults[gp] = active;
+                }
+            }
+
+            // Build refresh list, skipping storylets in inactive groups
+            List<Storylet> refreshList = new List<Storylet>();
+            foreach (Storylet storylet in poolState.Deck.Values)
+            {
+                string gp = storylet.GroupPredicate;
+                if (gp != null && groupResults.TryGetValue(gp, out bool groupActive) && !groupActive)
+                    continue;
+                refreshList.Add(storylet);
+            }
+            return refreshList;
         }
 
         private int GetWeighting(Storylet storylet)
@@ -368,6 +493,35 @@ namespace InkStoryletFramework
             return knotList;
         }
 
+        // Parse an array of raw Ink tag strings into a key/value dictionary.
+        //   #once            -> { "once": true }
+        //   #desc: Some text -> { "desc": "Some text" }
+        //   #loc: library    -> { "loc": "library" }
+        // Tag names are lowercased. "true"/"false" string values become booleans.
+        private static Dictionary<string, object> ParseTags(List<string> rawTags)
+        {
+            var result = new Dictionary<string, object>();
+            if (rawTags == null) return result;
+            foreach (string tag in rawTags)
+            {
+                int colonIdx = tag.IndexOf(':');
+                if (colonIdx == -1)
+                {
+                    result[tag.Trim().ToLower()] = true;
+                }
+                else
+                {
+                    string k = tag.Substring(0, colonIdx).Trim().ToLower();
+                    string v = tag.Substring(colonIdx + 1).Trim();
+                    string vLower = v.ToLower();
+                    if (vLower == "true") result[k] = true;
+                    else if (vLower == "false") result[k] = false;
+                    else result[k] = v;
+                }
+            }
+            return result;
+        }
+
         private class PoolState
         {
             internal readonly Dictionary<string, Storylet> Deck = new();
@@ -382,6 +536,7 @@ namespace InkStoryletFramework
             internal readonly string knotID;
             internal bool played;
             internal bool once;
+            internal string GroupPredicate; // null if no group predicate
 
             internal Storylet(string knotID)
             {

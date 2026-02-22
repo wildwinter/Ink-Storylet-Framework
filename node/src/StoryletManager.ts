@@ -20,13 +20,16 @@ export class StoryletManager {
     private _worker: any; // Node Worker type is dynamic
     private _pools: Map<string, PoolState> = new Map();
 
+    // Tag cache: knotID -> { tagName -> value }
+    private _storyletTags: Map<string, Record<string, any>> = new Map();
+
+    // All group predicate function names registered across all addStorylets() calls.
+    // These are evaluated on the main thread (where external Ink functions are bound)
+    // and sent to the worker as groupOverrides during each refresh.
+    private _groupPredicates: Set<string> = new Set();
+
     constructor(story: Story, workerPath: string = './StoryletWorker.js') {
         this._story = story;
-
-        // Node.js environment - Strict dependency on worker_threads
-        // We use dynamic require to avoid bundling issues if this file is looked at by a browser bundler,
-        // but arguably for a 'node' folder we could just import.
-        // Let's stick to strict require for safety.
 
         let Worker;
         try {
@@ -36,8 +39,6 @@ export class StoryletManager {
         }
 
         const worker = new Worker(workerPath);
-
-        // We'll treat _worker as the Node Worker type, but cast to any to avoid complex typings for now.
         this._worker = worker;
 
         // Node workers use .on('message'), not .onmessage
@@ -47,9 +48,6 @@ export class StoryletManager {
 
         worker.on('error', (err: any) => console.error("Worker Error:", err));
 
-        // Initialize worker with the story content extracted from the Story instance.
-        // The worker runs on a separate thread and cannot share the Story object directly,
-        // so it uses this JSON to construct its own instance.
         this.postMessage({
             type: 'INIT',
             storyContent: story.ToJson()
@@ -87,41 +85,56 @@ export class StoryletManager {
     // --- Storylet registration ---
 
     /**
-     * Scan for storylets matching `prefix` and register them into `pool`.
+     * Discover storylets whose knot names start with `name_` and register them into `pool`.
+     *
+     * The underscore is inferred: addStorylets("encounters") finds all knots beginning with
+     * "encounters_" and uses "_encounters()" as an optional group predicate.
+     *
+     * If an Ink function named `_<name>()` exists it is evaluated as a group gate on every
+     * refresh — if it returns false the entire group is skipped without checking individual
+     * storylet predicates. This is useful for location- or state-dependent pools (e.g. the
+     * group is only active when the player is in a certain area).
+     *
      * Defaults to the 'default' pool.
      */
-    public addStorylets(prefix: string, pool: string = DEFAULT_POOL): void {
-        const discovered: { knotID: string; once: boolean; }[] = [];
+    public addStorylets(name: string, pool: string = DEFAULT_POOL): void {
+        const prefix = name + '_';
         const knotIDs = this.getAllKnotIDs();
 
+        // Determine group predicate (optional — only used if the function exists)
+        const groupPredFn = '_' + name;
+        const groupPredicate = knotIDs.includes(groupPredFn) ? groupPredFn : null;
+        if (groupPredicate) this._groupPredicates.add(groupPredicate);
+
+        const discovered: { knotID: string; once: boolean; groupPredicate: string | null }[] = [];
+
         for (const knotID of knotIDs) {
-            if (knotID.startsWith(prefix)) {
-                // Using a _ as a prefix for the function
-                const functionName = "_" + knotID;
-                if (!knotIDs.includes(functionName)) {
-                    console.error(`Can't find test function ${functionName} for storylet ${knotID}.`);
-                    continue;
-                }
+            if (!knotID.startsWith(prefix)) continue;
 
-                // Check tags
-                let once = false;
-                // TagsForContentAtPath in inkjs is usually camelCase 'tagsForContentAtPath' in modern versions,
-                // but might be PascalCase in older ones.
-                // @ts-ignore
-                const tags = (this._story.TagsForContentAtPath) ? this._story.TagsForContentAtPath(knotID) : this._story.tagsForContentAtPath(knotID);
-
-                if (tags) {
-                    // Check for case-insensitive 'once'
-                    if (tags.some((t: string) => t.toLowerCase() === "once")) {
-                        once = true;
-                    }
-                }
-
-                discovered.push({ knotID, once });
+            // Each storylet must have a matching predicate function _knotID()
+            const functionName = '_' + knotID;
+            if (!knotIDs.includes(functionName)) {
+                console.error(`Can't find predicate function ${functionName} for storylet ${knotID}.`);
+                continue;
             }
+
+            // Read and cache all tags for this storylet
+            // @ts-ignore
+            const rawTags: string[] | null = (this._story.TagsForContentAtPath)
+                ? this._story.TagsForContentAtPath(knotID)
+                : this._story.tagsForContentAtPath(knotID);
+
+            const tags = parseTags(rawTags ?? []);
+            this._storyletTags.set(knotID, tags);
+
+            discovered.push({
+                knotID,
+                once: tags['once'] === true,
+                groupPredicate
+            });
         }
 
-        console.log(`[StoryletManager] Discovered ${discovered.length} storylets for pool "${pool}":`, discovered);
+        console.log(`[StoryletManager] Discovered ${discovered.length} storylets for pool "${pool}" (name="${name}"):`, discovered.map(d => d.knotID));
 
         this.getOrCreatePoolState(pool);
 
@@ -136,23 +149,24 @@ export class StoryletManager {
 
     /**
      * Refresh a specific pool, or all registered pools if no pool is specified.
-     * Serializes the current Ink state and sends it to the worker.
+     * Group predicates are evaluated here on the main thread (where external Ink functions
+     * are bound), then the results are forwarded to the worker along with the story state.
      * onRefreshComplete fires once per pool as each finishes.
      */
     public refresh(pool?: string): void {
+        const groupOverrides = this.evaluateGroupPredicates();
         const stateJson = this._story.state.ToJson();
 
         if (pool !== undefined) {
             const poolState = this.getOrCreatePoolState(pool);
             if (poolState.state === State.REFRESHING) return;
             poolState.state = State.REFRESHING;
-            this.postMessage({ type: 'REFRESH', stateJson, pool });
+            this.postMessage({ type: 'REFRESH', stateJson, pool, groupOverrides });
         } else {
-            // Mark all known pools as refreshing and send a single message
             for (const poolState of this._pools.values()) {
                 poolState.state = State.REFRESHING;
             }
-            this.postMessage({ type: 'REFRESH', stateJson });
+            this.postMessage({ type: 'REFRESH', stateJson, groupOverrides });
         }
     }
 
@@ -191,9 +205,65 @@ export class StoryletManager {
         return knotID;
     }
 
-    /** Mark a storylet as played in the given pool (default: 'default'). */
-    public markPlayed(knotID: string, pool: string = DEFAULT_POOL): void {
-        this.postMessage({ type: 'MARK_PLAYED', pool, knotID });
+    /**
+     * Mark a storylet as played. If pool is omitted, the message is sent to all registered
+     * pools — safe since the worker ignores unknown knotIDs.
+     */
+    public markPlayed(knotID: string, pool?: string): void {
+        if (pool !== undefined) {
+            this.postMessage({ type: 'MARK_PLAYED', pool, knotID });
+        } else {
+            for (const poolName of this._pools.keys()) {
+                this.postMessage({ type: 'MARK_PLAYED', pool: poolName, knotID });
+            }
+        }
+    }
+
+    // --- Tag queries ---
+
+    /**
+     * Returns the value of a named tag on a storylet knot, or defaultValue if absent.
+     * Tag names are case-insensitive. Values are parsed at registration time:
+     *   - "true"/"false" strings become booleans
+     *   - bare tags (no colon) become true
+     *   - everything else is returned as a trimmed string
+     */
+    public getStoryletTag(knotID: string, tagName: string, defaultValue: any = null): any {
+        const tags = this._storyletTags.get(knotID);
+        if (!tags) return defaultValue;
+        const key = tagName.toLowerCase();
+        return key in tags ? tags[key] : defaultValue;
+    }
+
+    /**
+     * Returns all playable storylets whose tag `tagName` equals `tagValue`.
+     * If `pool` is provided only that pool is searched; otherwise all pools are searched.
+     */
+    public getPlayableStoryletsWithTag(tagName: string, tagValue: any, pool?: string): string[] {
+        const poolNames = pool !== undefined ? [pool] : Array.from(this._pools.keys());
+        const result: string[] = [];
+        const key = tagName.toLowerCase();
+
+        for (const p of poolNames) {
+            const poolState = this._pools.get(p);
+            if (!poolState || poolState.state !== State.REFRESH_COMPLETE) continue;
+            for (const knotID of poolState.hand) {
+                const tags = this._storyletTags.get(knotID);
+                if (tags && tags[key] === tagValue) {
+                    result.push(knotID);
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Returns the first playable storylet whose tag `tagName` equals `tagValue`, or null.
+     * If `pool` is provided only that pool is searched; otherwise all pools are searched.
+     */
+    public getFirstPlayableStoryletWithTag(tagName: string, tagValue: any, pool?: string): string | null {
+        const matches = this.getPlayableStoryletsWithTag(tagName, tagValue, pool);
+        return matches.length > 0 ? matches[0] : null;
     }
 
     // --- Reset ---
@@ -280,15 +350,41 @@ export class StoryletManager {
         }
     }
 
+    /**
+     * Evaluate all registered group predicates on the main thread.
+     * This is done here rather than in the worker so that Ink external functions
+     * (e.g. get_map()) are available during evaluation.
+     * EvaluateFunction() is non-destructive — it saves and restores story state internally.
+     */
+    private evaluateGroupPredicates(): Record<string, boolean> {
+        const results: Record<string, boolean> = {};
+        for (const gp of this._groupPredicates) {
+            try {
+                const retVal = this._story.EvaluateFunction(gp);
+                if (typeof retVal === 'boolean') results[gp] = retVal;
+                else if (typeof retVal === 'number') results[gp] = retVal > 0;
+                else results[gp] = false;
+            } catch (_e) {
+                results[gp] = true; // Missing function → group always active
+            }
+        }
+        return results;
+    }
+
+    /**
+     * Parse #storylets: global tags and call addStorylets() for each.
+     * Tag format: #storylets:name  or  #storylets:name,poolName
+     * The bare name (without trailing underscore) is passed; the underscore is inferred.
+     */
     private addStoryletsFromGlobalTags(): void {
         const tags = this._story.globalTags;
         if (!tags) return;
         for (const tag of tags) {
             if (!tag.startsWith('storylets:')) continue;
             const parts = tag.slice('storylets:'.length).split(',');
-            const prefix = parts[0].trim();
+            const name = parts[0].trim();
             const pool = parts.length > 1 ? parts[1].trim() : DEFAULT_POOL;
-            if (prefix) this.addStorylets(prefix, pool);
+            if (name) this.addStorylets(name, pool);
         }
     }
 
@@ -325,7 +421,6 @@ export class StoryletManager {
             console.warn("[StoryletManager] Could not find namedContent");
         }
 
-        //console.log("[StoryletManager] All Knot IDs found:", knotList);
         return knotList;
     }
 }
@@ -334,4 +429,29 @@ enum State {
     NEEDS_REFRESH,
     REFRESHING,
     REFRESH_COMPLETE
+}
+
+/**
+ * Parse an array of raw Ink tag strings into a key/value map.
+ *   #once            → { once: true }
+ *   #desc: Some text → { desc: "Some text" }
+ *   #loc: library    → { loc: "library" }
+ * Tag names are lowercased. "true"/"false" string values become booleans.
+ */
+function parseTags(rawTags: string[]): Record<string, any> {
+    const result: Record<string, any> = {};
+    for (const tag of rawTags) {
+        const colonIdx = tag.indexOf(':');
+        if (colonIdx === -1) {
+            result[tag.trim().toLowerCase()] = true;
+        } else {
+            const key = tag.slice(0, colonIdx).trim().toLowerCase();
+            const raw = tag.slice(colonIdx + 1).trim();
+            const lower = raw.toLowerCase();
+            if (lower === 'true') result[key] = true;
+            else if (lower === 'false') result[key] = false;
+            else result[key] = raw;
+        }
+    }
+    return result;
 }

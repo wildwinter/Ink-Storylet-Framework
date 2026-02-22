@@ -6,6 +6,7 @@
     "build-unity": "cd unity && npm run build",
     "build-browser": "cd browser && npm run build",
     "build-node": "cd node && npm run build",
+    "compile-ink": "node browser/node_modules/inkjs/bin/inkjs-compiler.js ink/test.ink -o ink/test.ink.json && node browser/node_modules/inkjs/bin/inkjs-compiler.js ink/map-test.ink -o ink/map-test.ink.json",
     "build": "npm run build-browser && npm run build-node && npm run build-unity",
     "dist": "npm run build && rm -rf dist/v$npm_package_version && mkdir -p dist/v$npm_package_version && zip -r dist/v$npm_package_version/$npm_package_name-browser-v$npm_package_version.zip ./browser/build && zip -r dist/v$npm_package_version/$npm_package_name-node-v$npm_package_version.zip ./node/build && zip -r dist/v$npm_package_version/$npm_package_name-unity-v$npm_package_version.zip ./unity/build"
   },

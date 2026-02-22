@@ -1,4 +1,4 @@
-#storylets:story_
+#storylets:story
 
 // Note that this var could be altered
 // in Ink or by a binding to the game
