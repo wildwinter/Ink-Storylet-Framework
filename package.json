@@ -1,6 +1,6 @@
 {
   "name": "ink-storylet-framework",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "A simple storylet framework for Ink.",
   "scripts": {
     "build-unity": "cd unity && npm run build",
