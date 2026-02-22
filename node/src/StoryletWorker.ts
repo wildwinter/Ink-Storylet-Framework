@@ -7,18 +7,18 @@ declare var require: any;
 
 export type WorkerMessage =
     | { type: 'INIT', storyContent: any }
-    | { type: 'REGISTER_STORYLETS', storylets: { knotID: string; once: boolean }[] }
-    | { type: 'REFRESH', stateJson: string }
-    | { type: 'MARK_PLAYED', knotID: string }
-    | { type: 'RESET' }
-    | { type: 'LOAD_DATABOLT', json: string } // Custom load for the manager state
+    | { type: 'REGISTER_STORYLETS', pool: string, storylets: { knotID: string; once: boolean }[] }
+    | { type: 'REFRESH', stateJson: string, pool?: string }  // pool undefined = all pools
+    | { type: 'MARK_PLAYED', pool: string, knotID: string }
+    | { type: 'RESET', pool?: string }                       // pool undefined = all pools
+    | { type: 'LOAD_DATABOLT', json: string }
     | { type: 'SAVE_DATABOLT' };
 
 
 export type WorkerResponse =
     | { type: 'ERROR', message: string }
     | { type: 'INIT_COMPLETE' }
-    | { type: 'REFRESH_COMPLETE', hand: string[], handWeighted: string[] }
+    | { type: 'REFRESH_COMPLETE', pool: string, hand: string[], handWeighted: string[] }
     | { type: 'SAVE_DATABOLT', json: string };
 
 
@@ -36,7 +36,6 @@ if (parentPort) {
         handleMessage(msg);
     });
 } else {
-    // Should not happen if launched correctly
     console.error("StoryletWorker (Node): No parentPort found.");
 }
 
@@ -47,16 +46,16 @@ function handleMessage(msg: WorkerMessage) {
                 handleInit(msg.storyContent);
                 break;
             case 'REGISTER_STORYLETS':
-                handleRegisterStorylets(msg.storylets);
+                handleRegisterStorylets(msg.pool, msg.storylets);
                 break;
             case 'REFRESH':
-                handleRefresh(msg.stateJson);
+                handleRefresh(msg.stateJson, msg.pool);
                 break;
             case 'MARK_PLAYED':
-                handleMarkPlayed(msg.knotID);
+                handleMarkPlayed(msg.pool, msg.knotID);
                 break;
             case 'RESET':
-                handleReset();
+                handleReset(msg.pool);
                 break;
             case 'LOAD_DATABOLT':
                 handleLoad(msg.json);
@@ -76,7 +75,7 @@ function postResponse(msg: WorkerResponse) {
     }
 }
 
-// --- Logic (Identical to Browser, but encapsulated) ---
+// --- Logic ---
 
 interface Storylet {
     knotID: string;
@@ -85,14 +84,24 @@ interface Storylet {
 }
 
 let story: Story | null = null;
-const deck: Map<string, Storylet> = new Map();
+
+// pools: pool name -> (knotID -> Storylet)
+const pools: Map<string, Map<string, Storylet>> = new Map();
+
+function getOrCreatePool(pool: string): Map<string, Storylet> {
+    if (!pools.has(pool)) {
+        pools.set(pool, new Map());
+    }
+    return pools.get(pool)!;
+}
 
 function handleInit(storyContent: any) {
     story = new Story(storyContent);
     postResponse({ type: 'INIT_COMPLETE' });
 }
 
-function handleRegisterStorylets(storylets: { knotID: string; once: boolean }[]) {
+function handleRegisterStorylets(pool: string, storylets: { knotID: string; once: boolean }[]) {
+    const deck = getOrCreatePool(pool);
     for (const s of storylets) {
         if (!deck.has(s.knotID)) {
             deck.set(s.knotID, {
@@ -102,33 +111,19 @@ function handleRegisterStorylets(storylets: { knotID: string; once: boolean }[])
             });
         }
     }
-    // No response needed, just internal update
 }
 
-function handleRefresh(stateJson: string) {
-    if (!story) throw new Error("Worker not initialized with story content.");
-
-    story.state.LoadJson(stateJson);
-
+function refreshPool(poolName: string, deck: Map<string, Storylet>): void {
     const hand: string[] = [];
     const handWeighted: string[] = [];
 
-    // Evaluate predicates
     for (const s of deck.values()) {
-        // If 'once' and played, skip
         if (s.once && s.played) continue;
 
         const funcName = "_" + s.knotID;
-        // Evaluatefunction in inkjs might throw if function doesn't exist, 
-        // effectively handled by try-catch in onmessage
-
-        let result = story.EvaluateFunction(funcName);
-
-        // result is the return value of the function
-        // It could be boolean or int/float
+        let result = story!.EvaluateFunction(funcName);
 
         let weight = 0;
-
         if (typeof result === 'boolean') {
             weight = result ? 1 : 0;
         } else if (typeof result === 'number') {
@@ -143,34 +138,55 @@ function handleRefresh(stateJson: string) {
         }
     }
 
-    postResponse({
-        type: 'REFRESH_COMPLETE',
-        hand,
-        handWeighted
-    });
+    postResponse({ type: 'REFRESH_COMPLETE', pool: poolName, hand, handWeighted });
 }
 
-function handleMarkPlayed(knotID: string) {
-    const s = deck.get(knotID);
-    if (s) {
-        s.played = true;
+function handleRefresh(stateJson: string, pool?: string) {
+    if (!story) throw new Error("Worker not initialized with story content.");
+
+    story.state.LoadJson(stateJson);
+
+    if (pool !== undefined) {
+        refreshPool(pool, getOrCreatePool(pool));
+    } else {
+        for (const [poolName, deck] of pools) {
+            refreshPool(poolName, deck);
+        }
     }
 }
 
-function handleReset() {
-    for (const s of deck.values()) {
-        s.played = false;
+function handleMarkPlayed(pool: string, knotID: string) {
+    const deck = pools.get(pool);
+    if (deck) {
+        const s = deck.get(knotID);
+        if (s) s.played = true;
+    }
+}
+
+function handleReset(pool?: string) {
+    if (pool !== undefined) {
+        const deck = pools.get(pool);
+        if (deck) {
+            for (const s of deck.values()) s.played = false;
+        }
+    } else {
+        for (const deck of pools.values()) {
+            for (const s of deck.values()) s.played = false;
+        }
     }
 }
 
 function handleLoad(json: string) {
     try {
-        const data: [string, boolean][] = JSON.parse(json);
-        // data is [[knotID, played], ...]
-        for (const [id, played] of data) {
-            const s = deck.get(id);
-            if (s) {
-                s.played = played;
+        // Format: Record<poolName, [knotID, played][]>
+        const data: Record<string, [string, boolean][]> = JSON.parse(json);
+        for (const [poolName, entries] of Object.entries(data)) {
+            const deck = pools.get(poolName);
+            if (deck) {
+                for (const [id, played] of entries) {
+                    const s = deck.get(id);
+                    if (s) s.played = played;
+                }
             }
         }
     } catch (e) {
@@ -179,9 +195,13 @@ function handleLoad(json: string) {
 }
 
 function handleSave() {
-    const data: [string, boolean][] = [];
-    for (const s of deck.values()) {
-        data.push([s.knotID, s.played]);
+    // Format: Record<poolName, [knotID, played][]>
+    const data: Record<string, [string, boolean][]> = {};
+    for (const [poolName, deck] of pools) {
+        data[poolName] = [];
+        for (const s of deck.values()) {
+            data[poolName].push([s.knotID, s.played]);
+        }
     }
     postResponse({ type: 'SAVE_DATABOLT', json: JSON.stringify(data) });
 }

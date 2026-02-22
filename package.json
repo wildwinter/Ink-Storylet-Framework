@@ -1,6 +1,6 @@
 {
   "name": "ink-storylet-framework",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "A simple storylet framework for Ink.",
   "scripts": {
     "build-unity": "cd unity && npm run build",
@@ -12,7 +12,8 @@
   "keywords": [
     "ink",
     "storylet",
-    "framework"
+    "framework",
+    "unity"
   ],
   "author": "",
   "license": "MIT",

@@ -29,7 +29,7 @@ async function main() {
         const story = new Story(storyContent);
 
         // Point to the BUILT worker because Node's Worker thread needs a JS file.
-        // We use the CJS build for maximum compatibility in this test, 
+        // We use the CJS build for maximum compatibility in this test,
         // though ES build might work if configured with type:module.
         // Going up from node/test-harness/main.ts -> node/test-harness -> node -> build/cjs/StoryletWorker.js
         const workerPath = path.resolve(__dirname, '../build/cjs/StoryletWorker.js');
@@ -38,19 +38,25 @@ async function main() {
 
         const manager = new StoryletManager(story, storyContent, workerPath);
 
-        manager.onRefreshComplete = () => {
-            log('Refresh Complete! Playable storylets available.', 'success');
-            const hand = manager.getPlayableStorylets();
+        // onRefreshComplete now receives the pool name that just finished refreshing.
+        manager.onRefreshComplete = (pool: string) => {
+            log(`Refresh Complete for pool "${pool}"! Playable storylets available.`, 'success');
+            const hand = manager.getPlayableStorylets(false, pool);
             if (hand) {
-                console.log('\nPlayable Storylets:', hand);
+                console.log(`\nPlayable Storylets [${pool}]:`, hand);
             }
-            promptUser(manager, story);
+            // Only prompt the user once all registered pools are ready.
+            if (manager.areAllReady()) {
+                promptUser(manager, story);
+            }
         };
 
-        log('Scanning and adding storylets with prefix "story_"...', 'info');
+        log('Scanning and adding storylets with prefix "story_" into the default pool...', 'info');
         manager.addStorylets("story_");
+        // Example of adding a second pool — uncomment and add matching knots to your ink file:
+        // manager.addStorylets("encounter_", "encounters");
 
-        log('Manager initialized. Auto-refreshing...', 'success');
+        log('Manager initialized. Refreshing all pools...', 'success');
         manager.refresh();
 
     } catch (e: any) {
@@ -69,10 +75,10 @@ function promptUser(manager: StoryletManager, story: Story) {
             rl.close();
             process.exit(0);
         } else if (choice === 'r') {
-            log('Requesting Refresh...', 'info');
-            manager.refresh(); // This will trigger onRefreshComplete again
+            log('Requesting Refresh (all pools)...', 'info');
+            manager.refresh(); // refreshes all pools; onRefreshComplete fires once per pool
         } else if (choice === 'p') {
-            if (!manager.isReady) {
+            if (!manager.isReady()) {
                 log('Manager not ready.', 'error');
                 promptUser(manager, story);
                 return;
@@ -122,7 +128,7 @@ function continueStory(story: Story, manager: StoryletManager) {
         });
     } else {
         log("Storylet finished.", 'info');
-        // Auto-refresh after play
+        // Auto-refresh all pools after play
         manager.refresh();
     }
 }

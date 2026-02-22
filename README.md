@@ -39,7 +39,7 @@ For every storylet knot, there may be a corresponding Ink function. This functio
 
 This function determines if the storylet is available. It can return:
 
-* `true` / `false`: Is it available? (Means weight1 or 0)
+* `true` / `false`: Is it available? (Means weight 1 or 0)
 * `int`: A weighted value. Higher numbers mean the storylet is more likely to be picked if you are selecting randomly.
 
 ```ink
@@ -50,7 +50,43 @@ This function determines if the storylet is available. It can return:
 
 ### 3. Tags
 
-* `#once`: detailed on a knot. If this tag is present, the storylet will be discarded from the deck after it is played successfully. Otherwise, it remains in the deck and can be selected again.
+* `#once`: applied to a knot. If this tag is present, the storylet will be discarded from the deck after it is played successfully. Otherwise, it remains in the deck and can be selected again.
+
+## Pools
+
+All three implementations support **named pools** — independent groups of storylets that can be registered, queried, and refreshed separately while sharing the same underlying Ink story. This is useful when you have different categories of content that need to be managed independently, e.g. `"encounters"` and `"dialogues"`.
+
+All pool parameters default to `"default"`, so existing single-pool usage requires no changes.
+
+```typescript
+// TypeScript / Node example
+manager.addStorylets("encounter_", "encounters");
+manager.addStorylets("dialogue_", "dialogues");
+
+// Refresh all pools at once, or a specific one
+manager.refresh();           // all pools
+manager.refresh("encounters"); // one pool
+
+// Query a specific pool
+const available = manager.getPlayableStorylets(false, "encounters");
+const picked    = manager.pickPlayableStorylet("encounters");
+```
+
+```csharp
+// Unity / C# example
+storyletManager.AddStorylets("encounter_", "encounters");
+storyletManager.AddStorylets("dialogue_", "dialogues");
+
+storyletManager.Refresh();             // all pools
+storyletManager.Refresh("encounters"); // one pool
+
+var available = storyletManager.GetPlayableStorylets(false, "encounters");
+var picked    = storyletManager.PickPlayableStorylet("encounters");
+```
+
+The `onRefreshComplete` callback (or `OnRefreshComplete` in C#) now receives the name of the pool that just finished refreshing, and is called once per pool. Use `areAllReady()` / `AreAllReady()` to check whether every registered pool has completed its refresh.
+
+---
 
 ## Usage: TypeScript (Web)
 
@@ -77,96 +113,120 @@ const story = new Story(storyContent);
 // Initialize Manager (requires path to the worker script)
 const manager = new StoryletManager(story, storyContent, './StoryletWorker.js');
 
-// Register Storylets
-// Scans the story for all knots starting with "story_"
+// Register storylets — optionally pass a pool name (defaults to "default")
 manager.addStorylets("story_");
+manager.addStorylets("encounter_", "encounters");
 
-// Start the Refresh Loop (Async)
-manager.onRefreshComplete = () => {
-    // This is called when the worker finishes calculating playable storylets
-    const playable = manager.getPlayableStorylets();
-    console.log("Available storylets:", playable);
+// Called once per pool each time that pool's refresh completes
+manager.onRefreshComplete = (pool: string) => {
+    const playable = manager.getPlayableStorylets(false, pool);
+    console.log(`Available storylets [${pool}]:`, playable);
 };
 
-// Trigger the first refresh
+// Refresh all pools
 manager.refresh();
+```
+
+### State checks
+
+```typescript
+manager.isReady()             // default pool
+manager.isReady("encounters") // specific pool
+manager.areAllReady()         // true when every registered pool is ready
 ```
 
 ### Playing a Storylet
 
-When you are ready to play a storylet (e.g., user clicked a card):
-
 ```typescript
-// Pick one (randomly weighted)
-// This is just an example.
+// Pick one from the default pool (randomly weighted)
 const knotName = manager.pickPlayableStorylet();
 
+// Or from a named pool
+const knotName = manager.pickPlayableStorylet("encounters");
+
 if (knotName) {
-    // Jump to it in the main Ink story
     story.ChoosePathString(knotName);
-    
-    // Play as normal
     while (story.canContinue) {
         console.log(story.Continue());
     }
 }
 ```
 
+---
+
 ## Usage: Node.js
 
 The `node` directory contains a specialized implementation for Node.js using `worker_threads`.
 
-```javascript
-const { Story } = require('inkjs');
-const { StoryletManager } = require('./StoryletManager'); // Path to compiled JS
-const storyContent = require('./your-story.json');
+```typescript
+import { Story } from 'inkjs';
+import { StoryletManager } from './StoryletManager'; // path to compiled JS
 
-// Initialize
 const story = new Story(storyContent);
-
-// Initialize Manager
-// Ensure the worker script is also compiled and accessible
-// The Node version handles worker_threads internally
 const manager = new StoryletManager(story, storyContent, './StoryletWorker.js');
 
-// Use as normal
+// Register storylets — optionally pass a pool name (defaults to "default")
 manager.addStorylets("story_");
-manager.onRefreshComplete = () => {
-    console.log("Available:", manager.getPlayableStorylets());
+manager.addStorylets("encounter_", "encounters");
+
+// Called once per pool each time that pool's refresh completes
+manager.onRefreshComplete = (pool: string) => {
+    console.log(`Available [${pool}]:`, manager.getPlayableStorylets(false, pool));
+    if (manager.areAllReady()) {
+        // All pools are ready — safe to proceed
+    }
 };
+
+// Refresh all pools
 manager.refresh();
 ```
 
+---
+
 ## Usage: Unity (C#)
 
-The Unity version runs synchronously on the main thread.
+The Unity version runs the refresh spread across frames using a `Tick()` method.
 
 ### Unity Setup
 
 ```csharp
 using InkStoryletFramework;
 
-// Initialize
 StoryletsManager storyletManager = new StoryletsManager(myInkStory);
 
-// Add Storylets
+// Register storylets — optionally pass a pool name (defaults to "default")
 storyletManager.AddStorylets("story_");
+storyletManager.AddStorylets("encounter_", "encounters");
 
-// Refresh (Must be called to populate the list)
+// Called once per pool each time that pool's refresh completes
+storyletManager.OnRefreshComplete = (pool) => {
+    Debug.Log($"Pool '{pool}' is ready.");
+    if (storyletManager.AreAllReady()) {
+        // All pools are ready — safe to proceed
+    }
+};
+
+// Refresh all pools (or pass a pool name to refresh just one)
 storyletManager.Refresh();
 ```
 
 ### Game Loop
 
-You generally want to tick the manager to process updates.
+`Tick()` must be called every frame. It processes up to `StoryletsToProcessPerFrame` storylets per refreshing pool per frame.
 
 ```csharp
-void Update() {
+void Update()
+{
     storyletManager.Tick();
-    
-    if (storyletManager.IsReady) {
-        var playable = storyletManager.GetPlayableStorylets();
-        // Update UI...
-    }
+
+    if (storyletManager.IsReady())                  // default pool
+    if (storyletManager.IsReady("encounters"))       // specific pool
+    if (storyletManager.AreAllReady())              // all pools
+
+    var playable = storyletManager.GetPlayableStorylets();                    // default pool
+    var playable = storyletManager.GetPlayableStorylets(false, "encounters"); // named pool
+
+    var picked = storyletManager.PickPlayableStorylet();             // default pool
+    var picked = storyletManager.PickPlayableStorylet("encounters"); // named pool
 }
 ```

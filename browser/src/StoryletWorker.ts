@@ -3,19 +3,18 @@ import { Story } from 'inkjs';
 // Define the shape of messages exchanged
 export type WorkerMessage =
     | { type: 'INIT', storyContent: any }
-    | { type: 'REGISTER_STORYLETS', storylets: { knotID: string; once: boolean; }[] }
-    | { type: 'REFRESH', stateJson: string }
-    | { type: 'MARK_PLAYED', knotID: string }
-    | { type: 'RESET' }
-    | { type: 'RESET' }
-    | { type: 'LOAD_DATABOLT', json: string } // Custom load for the manager state
+    | { type: 'REGISTER_STORYLETS', pool: string, storylets: { knotID: string; once: boolean; }[] }
+    | { type: 'REFRESH', stateJson: string, pool?: string }  // pool undefined = all pools
+    | { type: 'MARK_PLAYED', pool: string, knotID: string }
+    | { type: 'RESET', pool?: string }                       // pool undefined = all pools
+    | { type: 'LOAD_DATABOLT', json: string }
     | { type: 'SAVE_DATABOLT' };
 
 
 export type WorkerResponse =
     | { type: 'ERROR', message: string }
     | { type: 'INIT_COMPLETE' }
-    | { type: 'REFRESH_COMPLETE', hand: string[], handWeighted: string[] }
+    | { type: 'REFRESH_COMPLETE', pool: string, hand: string[], handWeighted: string[] }
     | { type: 'SAVE_DATABOLT', json: string };
 
 // Internal class to hold storylet state
@@ -30,7 +29,16 @@ class Storylet {
 }
 
 let story: Story | null = null;
-let deck: Map<string, Storylet> = new Map();
+
+// pools: pool name -> (knotID -> Storylet)
+const pools: Map<string, Map<string, Storylet>> = new Map();
+
+function getOrCreatePool(pool: string): Map<string, Storylet> {
+    if (!pools.has(pool)) {
+        pools.set(pool, new Map());
+    }
+    return pools.get(pool)!;
+}
 
 // --- Message Handling ---
 
@@ -43,16 +51,16 @@ self.onmessage = (event: MessageEvent<WorkerMessage>) => {
                 handleInit(msg.storyContent);
                 break;
             case 'REGISTER_STORYLETS':
-                handleRegisterStorylets(msg.storylets);
+                handleRegisterStorylets(msg.pool, msg.storylets);
                 break;
             case 'REFRESH':
-                handleRefresh(msg.stateJson);
+                handleRefresh(msg.stateJson, msg.pool);
                 break;
             case 'MARK_PLAYED':
-                handleMarkPlayed(msg.knotID);
+                handleMarkPlayed(msg.pool, msg.knotID);
                 break;
             case 'RESET':
-                handleReset();
+                handleReset(msg.pool);
                 break;
             case 'LOAD_DATABOLT':
                 handleLoad(msg.json);
@@ -74,13 +82,11 @@ function postResponse(msg: WorkerResponse) {
 
 function handleInit(content: any) {
     story = new Story(content);
-    // deck.clear(); // internal deck persists across story re-inits? No, probably should clear.
-    deck.clear();
+    pools.clear();
     postResponse({ type: 'INIT_COMPLETE' });
 }
 
-function handleRegisterStorylets(list: { knotID: string; once: boolean; }[]) {
-    // Need robust access to check functions
+function handleRegisterStorylets(pool: string, list: { knotID: string; once: boolean; }[]) {
     // @ts-ignore
     const mainContentContainer = story.mainContentContainer || story._mainContentContainer;
     // @ts-ignore
@@ -88,15 +94,13 @@ function handleRegisterStorylets(list: { knotID: string; once: boolean; }[]) {
 
     if (!namedContent) {
         console.error("Worker: Could not access namedContent to verify storylet functions.");
-        // We might want to proceed blindly or return error. 
-        // Proceeding blindly is risky if function doesn't exist.
     }
 
+    const deck = getOrCreatePool(pool);
+
     for (const item of list) {
-        // Just verify the function exists in our local story copy to be safe
         const functionName = "_" + item.knotID;
 
-        // If we found namedContent, check it.
         if (namedContent) {
             let exists = false;
             // @ts-ignore
@@ -120,22 +124,12 @@ function handleRegisterStorylets(list: { knotID: string; once: boolean; }[]) {
     }
 }
 
-function handleRefresh(stateJson: string) {
-    if (!story) {
-        throw new Error("StoryletWorker not initialized.");
-    }
-
-    // Sync state
-    if (stateJson) {
-        story.state.LoadJson(stateJson);
-    }
-
+function refreshPool(poolName: string, deck: Map<string, Storylet>): void {
     const hand: string[] = [];
     const handWeighted: string[] = [];
 
-    // Process all storylets at once (async from main thread perspective)
     for (const storylet of deck.values()) {
-        const weighting = getWeighting(story, storylet);
+        const weighting = getWeighting(story!, storylet);
         if (weighting > 0) {
             hand.push(storylet.knotID);
             for (let i = 0; i < weighting; i++) {
@@ -144,27 +138,60 @@ function handleRefresh(stateJson: string) {
         }
     }
 
-    postResponse({ type: 'REFRESH_COMPLETE', hand, handWeighted });
+    postResponse({ type: 'REFRESH_COMPLETE', pool: poolName, hand, handWeighted });
 }
 
-function handleMarkPlayed(knotID: string) {
-    const s = deck.get(knotID);
-    if (s) s.played = true;
-}
-
-function handleReset() {
-    for (const s of deck.values()) {
-        s.played = false;
+function handleRefresh(stateJson: string, pool?: string) {
+    if (!story) {
+        throw new Error("StoryletWorker not initialized.");
     }
-    // We don't clear the deck, just the play state
+
+    if (stateJson) {
+        story.state.LoadJson(stateJson);
+    }
+
+    if (pool !== undefined) {
+        refreshPool(pool, getOrCreatePool(pool));
+    } else {
+        for (const [poolName, deck] of pools) {
+            refreshPool(poolName, deck);
+        }
+    }
+}
+
+function handleMarkPlayed(pool: string, knotID: string) {
+    const deck = pools.get(pool);
+    if (deck) {
+        const s = deck.get(knotID);
+        if (s) s.played = true;
+    }
+}
+
+function handleReset(pool?: string) {
+    if (pool !== undefined) {
+        const deck = pools.get(pool);
+        if (deck) {
+            for (const s of deck.values()) s.played = false;
+        }
+    } else {
+        for (const deck of pools.values()) {
+            for (const s of deck.values()) s.played = false;
+        }
+    }
 }
 
 function handleLoad(json: string) {
     handleReset();
-    const data = JSON.parse(json) as [string, boolean][];
-    for (const [knotID, played] of data) {
-        const s = deck.get(knotID);
-        if (s) s.played = played;
+    // Format: Record<poolName, [knotID, played][]>
+    const data: Record<string, [string, boolean][]> = JSON.parse(json);
+    for (const [poolName, entries] of Object.entries(data)) {
+        const deck = pools.get(poolName);
+        if (deck) {
+            for (const [knotID, played] of entries) {
+                const s = deck.get(knotID);
+                if (s) s.played = played;
+            }
+        }
     }
 }
 
@@ -175,7 +202,6 @@ function getWeighting(story: Story, storylet: Storylet): number {
         return 0;
     }
 
-    // Evaluate function in the forked story instance
     let retVal;
     try {
         retVal = story.EvaluateFunction("_" + storylet.knotID);
@@ -194,46 +220,14 @@ function getWeighting(story: Story, storylet: Storylet): number {
     return 0;
 }
 
-function getAllKnotIDs(story: Story): string[] {
-    const knotList: string[] = [];
-    // @ts-ignore
-    const mainContentContainer = story.mainContentContainer || story._mainContentContainer;
-
-    if (!mainContentContainer) return knotList;
-
-    // @ts-ignore
-    const namedContent = mainContentContainer.namedOnlyContent || mainContentContainer.namedContent;
-    if (namedContent) {
-        // @ts-ignore
-        if (namedContent instanceof Map || (typeof namedContent.keys === 'function' && typeof namedContent.get === 'function')) {
-            // @ts-ignore
-            for (const name of namedContent.keys()) {
-                if (name === "global decl") continue;
-                knotList.push(name);
-            }
-        } else {
-            for (const name of Object.keys(namedContent)) {
-                if (name === "global decl") continue;
-                knotList.push(name);
-            }
-        }
-    }
-
-    return knotList;
-}
-
-// If we want to support saving, we also need a handler for requesting save data.
-// But the original request didn't explicitly ask for save support in the worker, 
-// though the original class had SaveAsJson. 
-// I'll add a listener for it if needed, but for now I've implemented LOAD.
-// Let's add SAVE support to be complete.
-// Function to handle save request
 function handleSave() {
-    const data: [string, boolean][] = [];
-    for (const s of deck.values()) {
-        data.push([s.knotID, s.played]);
+    // Format: Record<poolName, [knotID, played][]>
+    const data: Record<string, [string, boolean][]> = {};
+    for (const [poolName, deck] of pools) {
+        data[poolName] = [];
+        for (const s of deck.values()) {
+            data[poolName].push([s.knotID, s.played]);
+        }
     }
     postResponse({ type: 'SAVE_DATABOLT', json: JSON.stringify(data) });
 }
-
-// Previous standalone listener removed in favor of integrated switch.

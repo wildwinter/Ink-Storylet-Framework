@@ -4,35 +4,29 @@ import type { WorkerMessage, WorkerResponse } from './StoryletWorker';
 declare var require: any;
 declare var process: any;
 
+const DEFAULT_POOL = 'default';
+
+interface PoolState {
+    hand: string[];
+    handWeighted: string[];
+    state: State;
+}
 
 export class StoryletManager {
-    public onRefreshComplete: (() => void) | null = null;
-
-    public get isReady(): boolean {
-        return this._state === State.REFRESH_COMPLETE;
-    }
-
-    public get isRefreshing(): boolean {
-        return this._state === State.REFRESHING;
-    }
-
-    public get needsRefresh(): boolean {
-        return this._state === State.NEEDS_REFRESH;
-    }
+    /** Called once per pool each time that pool's refresh completes. */
+    public onRefreshComplete: ((pool: string) => void) | null = null;
 
     private _story: Story;
     private _worker: any; // Node Worker type is dynamic
-    private _hand: string[] = [];
-    private _handWeighted: string[] = [];
-    private _state: State = State.NEEDS_REFRESH;
+    private _pools: Map<string, PoolState> = new Map();
 
     // We pass the RAW JSON content for the worker to initialize its own instance
     constructor(story: Story, storyContentJson: any, workerPath: string = './StoryletWorker.js') {
         this._story = story;
 
         // Node.js environment - Strict dependency on worker_threads
-        // We use dynamic require to avoid bundling issues if this file is looked at by a browser bundler, 
-        // but arguably for a 'node' folder we could just import. 
+        // We use dynamic require to avoid bundling issues if this file is looked at by a browser bundler,
+        // but arguably for a 'node' folder we could just import.
         // Let's stick to strict require for safety.
 
         let Worker;
@@ -49,9 +43,6 @@ export class StoryletManager {
 
         // Node workers use .on('message'), not .onmessage
         worker.on('message', (data: any) => {
-            // Simulate MessageEvent structure for our internal handler if needed, 
-            // or just pass data directly and adjust handler. 
-            // Our internal handler expects { data: ... }
             this.handleWorkerMessage({ data } as MessageEvent);
         });
 
@@ -64,7 +55,39 @@ export class StoryletManager {
         });
     }
 
-    public addStorylets(prefix: string): void {
+    // --- State accessors ---
+
+    /** Returns true if the given pool (default: 'default') has a completed refresh. */
+    public isReady(pool: string = DEFAULT_POOL): boolean {
+        return this.getPoolState(pool).state === State.REFRESH_COMPLETE;
+    }
+
+    /** Returns true if the given pool (default: 'default') is currently refreshing. */
+    public isRefreshing(pool: string = DEFAULT_POOL): boolean {
+        return this.getPoolState(pool).state === State.REFRESHING;
+    }
+
+    /** Returns true if the given pool (default: 'default') needs a refresh. */
+    public needsRefresh(pool: string = DEFAULT_POOL): boolean {
+        return this.getPoolState(pool).state === State.NEEDS_REFRESH;
+    }
+
+    /** Returns true if every registered pool has a completed refresh. */
+    public areAllReady(): boolean {
+        if (this._pools.size === 0) return false;
+        for (const poolState of this._pools.values()) {
+            if (poolState.state !== State.REFRESH_COMPLETE) return false;
+        }
+        return true;
+    }
+
+    // --- Storylet registration ---
+
+    /**
+     * Scan for storylets matching `prefix` and register them into `pool`.
+     * Defaults to the 'default' pool.
+     */
+    public addStorylets(prefix: string, pool: string = DEFAULT_POOL): void {
         const discovered: { knotID: string; once: boolean; }[] = [];
         const knotIDs = this.getAllKnotIDs();
 
@@ -79,7 +102,7 @@ export class StoryletManager {
 
                 // Check tags
                 let once = false;
-                // TagsForContentAtPath in inkjs is usually camelCase 'tagsForContentAtPath' in modern versions, 
+                // TagsForContentAtPath in inkjs is usually camelCase 'tagsForContentAtPath' in modern versions,
                 // but might be PascalCase in older ones.
                 // @ts-ignore
                 const tags = (this._story.TagsForContentAtPath) ? this._story.TagsForContentAtPath(knotID) : this._story.tagsForContentAtPath(knotID);
@@ -95,84 +118,109 @@ export class StoryletManager {
             }
         }
 
-        console.log(`[StoryletManager] Discovered ${discovered.length} storylets:`, discovered);
+        console.log(`[StoryletManager] Discovered ${discovered.length} storylets for pool "${pool}":`, discovered);
+
+        this.getOrCreatePoolState(pool);
 
         this.postMessage({
             type: 'REGISTER_STORYLETS',
+            pool,
             storylets: discovered
         });
+    }
 
-        this._state = State.NEEDS_REFRESH;
+    // --- Refresh ---
+
+    /**
+     * Refresh a specific pool, or all registered pools if no pool is specified.
+     * Serializes the current Ink state and sends it to the worker.
+     * onRefreshComplete fires once per pool as each finishes.
+     */
+    public refresh(pool?: string): void {
+        const stateJson = this._story.state.ToJson();
+
+        if (pool !== undefined) {
+            const poolState = this.getOrCreatePoolState(pool);
+            if (poolState.state === State.REFRESHING) return;
+            poolState.state = State.REFRESHING;
+            this.postMessage({ type: 'REFRESH', stateJson, pool });
+        } else {
+            // Mark all known pools as refreshing and send a single message
+            for (const poolState of this._pools.values()) {
+                poolState.state = State.REFRESHING;
+            }
+            this.postMessage({ type: 'REFRESH', stateJson });
+        }
+    }
+
+    // --- Query ---
+
+    /**
+     * Returns the playable storylets for the given pool (default: 'default').
+     * Returns null if that pool's refresh is not yet complete.
+     */
+    public getPlayableStorylets(weighted: boolean = false, pool: string = DEFAULT_POOL): string[] | null {
+        const poolState = this._pools.get(pool);
+        if (!poolState || poolState.state !== State.REFRESH_COMPLETE) {
+            console.error(`Don't call getPlayableStorylets until refresh is complete for pool "${pool}"!`);
+            return null;
+        }
+        return weighted ? poolState.handWeighted : poolState.hand;
     }
 
     /**
-     * Start the async refresh.
-     * This serializes the current main thread Ink state and sends it to the worker.
+     * Picks a random playable storylet from the given pool (default: 'default'),
+     * weighted by predicate return values, and marks it as played.
+     * Returns null if the pool is not ready or has no playable storylets.
      */
-    public refresh(): void {
-        if (this._state === State.REFRESHING) return;
-
-        this._state = State.REFRESHING;
-
-        // Capture current state
-        const stateJson = this._story.state.ToJson();
-
-        this.postMessage({
-            type: 'REFRESH',
-            stateJson: stateJson
-        });
-    }
-
-    public getPlayableStorylets(weighted: boolean = false): string[] | null {
-        if (this._state !== State.REFRESH_COMPLETE) {
-            console.error("Don't call getPlayableStorylets until refresh is complete!");
+    public pickPlayableStorylet(pool: string = DEFAULT_POOL): string | null {
+        const poolState = this._pools.get(pool);
+        if (!poolState || poolState.state !== State.REFRESH_COMPLETE) {
+            console.error(`Don't call pickPlayableStorylet until refresh is complete for pool "${pool}"!`);
             return null;
         }
 
-        if (!weighted) {
-            return this._hand;
-        }
-        return this._handWeighted;
-    }
+        if (poolState.handWeighted.length === 0) return null;
 
-    public markPlayed(knotID: string): void {
-        // Fire and forget update to worker
-        this.postMessage({ type: 'MARK_PLAYED', knotID });
-    }
-
-    public pickPlayableStorylet(): string | null {
-        if (this._state !== State.REFRESH_COMPLETE) {
-            console.error("Don't call pickPlayableStorylet until refresh is complete!");
-            return null;
-        }
-
-        if (this._handWeighted.length === 0) {
-            return null;
-        }
-
-        const i = Math.floor(Math.random() * this._handWeighted.length);
-        const knotID = this._handWeighted[i];
-        this.markPlayed(knotID);
+        const i = Math.floor(Math.random() * poolState.handWeighted.length);
+        const knotID = poolState.handWeighted[i];
+        this.markPlayed(knotID, pool);
         return knotID;
     }
 
-    public reset(): void {
-        this._hand = [];
-        this._handWeighted = [];
-        this._state = State.NEEDS_REFRESH;
-        this.postMessage({ type: 'RESET' });
+    /** Mark a storylet as played in the given pool (default: 'default'). */
+    public markPlayed(knotID: string, pool: string = DEFAULT_POOL): void {
+        this.postMessage({ type: 'MARK_PLAYED', pool, knotID });
     }
+
+    // --- Reset ---
+
+    /**
+     * Reset played state for a specific pool, or all pools if none specified.
+     * The pool's hand is cleared and state returns to NEEDS_REFRESH.
+     */
+    public reset(pool?: string): void {
+        if (pool !== undefined) {
+            const poolState = this._pools.get(pool);
+            if (poolState) {
+                poolState.hand = [];
+                poolState.handWeighted = [];
+                poolState.state = State.NEEDS_REFRESH;
+            }
+        } else {
+            for (const poolState of this._pools.values()) {
+                poolState.hand = [];
+                poolState.handWeighted = [];
+                poolState.state = State.NEEDS_REFRESH;
+            }
+        }
+        this.postMessage({ type: 'RESET', pool });
+    }
+
+    // --- Save / Load ---
 
     public saveAsJson(): Promise<string> {
         return new Promise((resolve) => {
-            const tempHandler = (e: any) => {
-                if (e.type === 'SAVE_DATABOLT') {
-                    this._worker.off('message', tempHandler);
-                    resolve(e.json);
-                }
-            };
-            // Node worker listener needs adapting
-            // The easier path:
             const nodeHandler = (data: any) => {
                 if (data.type === 'SAVE_DATABOLT') {
                     this._worker.off('message', nodeHandler);
@@ -193,6 +241,19 @@ export class StoryletManager {
         this._worker.terminate();
     }
 
+    // --- Private ---
+
+    private getOrCreatePoolState(pool: string): PoolState {
+        if (!this._pools.has(pool)) {
+            this._pools.set(pool, { hand: [], handWeighted: [], state: State.NEEDS_REFRESH });
+        }
+        return this._pools.get(pool)!;
+    }
+
+    private getPoolState(pool: string): PoolState {
+        return this._pools.get(pool) ?? { hand: [], handWeighted: [], state: State.NEEDS_REFRESH };
+    }
+
     private postMessage(msg: WorkerMessage) {
         this._worker.postMessage(msg);
     }
@@ -201,14 +262,15 @@ export class StoryletManager {
         const msg = event.data;
         switch (msg.type) {
             case 'INIT_COMPLETE':
-                // Worker is ready
                 break;
-            case 'REFRESH_COMPLETE':
-                this._hand = msg.hand;
-                this._handWeighted = msg.handWeighted;
-                this._state = State.REFRESH_COMPLETE;
-                if (this.onRefreshComplete) this.onRefreshComplete();
+            case 'REFRESH_COMPLETE': {
+                const poolState = this.getOrCreatePoolState(msg.pool);
+                poolState.hand = msg.hand;
+                poolState.handWeighted = msg.handWeighted;
+                poolState.state = State.REFRESH_COMPLETE;
+                if (this.onRefreshComplete) this.onRefreshComplete(msg.pool);
                 break;
+            }
             case 'ERROR':
                 console.error("StoryletManager Worker Error:", msg.message);
                 break;

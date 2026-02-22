@@ -27,17 +27,23 @@ function init() {
 
         manager = new StoryletManager(story, storyContent, workerUrl);
 
-        // Test addStorylets
-        log('Scanning and adding storylets with prefix "story_"...', 'info');
-        manager.addStorylets("story_");
-
-        manager.onRefreshComplete = () => {
-            log('Refresh Complete! Playable storylets available.', 'success');
-            statusEl.textContent = 'Status: Ready';
-            updatePlayableList();
+        // onRefreshComplete now receives the pool name that just finished refreshing.
+        manager.onRefreshComplete = (pool: string) => {
+            log(`Refresh Complete for pool "${pool}"! Playable storylets available.`, 'success');
+            // Only update the UI once all registered pools are ready.
+            if (manager!.areAllReady()) {
+                statusEl.textContent = 'Status: Ready';
+                updatePlayableList();
+            }
         };
 
-        log('Manager initialized. Auto-refreshing...', 'success');
+        // Test addStorylets
+        log('Scanning and adding storylets with prefix "story_" into the default pool...', 'info');
+        manager.addStorylets("story_");
+        // Example of adding a second pool — uncomment and add matching knots to your ink file:
+        // manager.addStorylets("encounter_", "encounters");
+
+        log('Manager initialized. Refreshing all pools...', 'success');
         statusEl.textContent = 'Status: Initialized';
         manager.refresh();
 
@@ -54,14 +60,14 @@ setTimeout(init, 500);
 document.getElementById('btn-refresh')!.addEventListener('click', () => {
     if (!manager) return log('Manager not initialized', 'error');
 
-    log('Requesting Refresh...', 'info');
+    log('Requesting Refresh (all pools)...', 'info');
     statusEl.textContent = 'Status: Refreshing...';
     manager.refresh();
 });
 
 document.getElementById('btn-pick')!.addEventListener('click', () => {
     if (!manager) return log('Manager not initialized', 'error');
-    if (!manager.isReady) return log('Manager not ready (refresh pending)', 'error');
+    if (!manager.isReady()) return log('Manager not ready (refresh pending)', 'error');
 
     const picked = manager.pickPlayableStorylet();
     if (picked) {
@@ -117,7 +123,7 @@ document.getElementById('btn-reset')!.addEventListener('click', () => {
 });
 
 function updatePlayableList() {
-    if (!manager || !manager.isReady) return;
+    if (!manager || !manager.isReady()) return;
     const list = manager.getPlayableStorylets();
     log(`Playable Storylets: [${list?.join(', ')}]`, 'info');
 }
