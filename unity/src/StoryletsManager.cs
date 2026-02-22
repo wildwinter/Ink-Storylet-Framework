@@ -89,13 +89,6 @@ namespace InkStoryletFramework
                 if (!knotID.StartsWith(prefix))
                     continue;
 
-                string functionName = "_" + knotID;
-                if (!knotIDs.Contains(functionName))
-                {
-                    Debug.LogError($"Can't find predicate function {functionName} for storylet {knotID}.");
-                    continue;
-                }
-
                 Storylet storylet = new(knotID);
                 storylet.GroupPredicate = groupPredicate;
                 poolState.Deck[knotID] = storylet;
@@ -459,7 +452,16 @@ namespace InkStoryletFramework
             if (storylet.played && storylet.once)
                 return 0;
 
-            object retVal = _story.EvaluateFunction("_" + storylet.knotID);
+            object retVal;
+            try
+            {
+                retVal = _story.EvaluateFunction("_" + storylet.knotID);
+            }
+            catch (Exception)
+            {
+                return 1; // Missing predicate → always available
+            }
+
             if (retVal is bool playable)
                 return playable ? 1 : 0;
 

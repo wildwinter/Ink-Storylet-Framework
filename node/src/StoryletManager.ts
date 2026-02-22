@@ -100,18 +100,12 @@ export class StoryletManager {
         for (const knotID of knotIDs) {
             if (!knotID.startsWith(prefix)) continue;
 
-            // Each storylet must have a matching predicate function _knotID()
-            const functionName = '_' + knotID;
-            if (!knotIDs.includes(functionName)) {
-                console.error(`Can't find predicate function ${functionName} for storylet ${knotID}.`);
-                continue;
-            }
-
-            // Read and cache all tags for this storylet
-            // @ts-ignore
-            const rawTags: string[] | null = (this._story.TagsForContentAtPath)
-                ? this._story.TagsForContentAtPath(knotID)
-                : this._story.tagsForContentAtPath(knotID);
+            // Read and cache all tags for this storylet (cast to any to handle
+            // both inkjs API versions: TagsForContentAtPath vs tagsForContentAtPath)
+            const storyAny = this._story as any;
+            const rawTags: string[] | null = storyAny.TagsForContentAtPath
+                ? storyAny.TagsForContentAtPath(knotID)
+                : storyAny.tagsForContentAtPath?.(knotID) ?? null;
 
             const tags = parseTags(rawTags ?? []);
             this._storyletTags.set(knotID, tags);
@@ -391,7 +385,7 @@ export class StoryletManager {
         try {
             retVal = this._story.EvaluateFunction('_' + storylet.knotID);
         } catch (_e) {
-            return 0;
+            return 1; // Missing predicate → always available
         }
 
         if (typeof retVal === 'boolean') return retVal ? 1 : 0;

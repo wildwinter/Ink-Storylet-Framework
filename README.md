@@ -35,11 +35,11 @@ You approach the King's throne.
 
 ### 2. The Predicate Function
 
-For every storylet knot there must be a corresponding Ink function. It shares the knot's name but is prefixed with an underscore (`_`).
+A storylet knot may optionally have a corresponding Ink **predicate function**. It shares the knot's name but is prefixed with an underscore (`_`). If no predicate function is present the storylet is treated as always available (weight 1).
 
-This function determines if the storylet is available. It can return:
+The predicate can return:
 
-* `true` / `false`: Is it available? (Means weight 1 or 0)
+* `true` / `false`: Is it available? (Equivalent to weight 1 or 0)
 * `int`: A weighted value. Higher numbers mean the storylet is more likely to be picked if you are selecting randomly.
 
 ```ink
@@ -73,7 +73,7 @@ The merchant has many fine wares.
 
 ### 4. Group Predicates
 
-If you define an Ink function whose name is `_<name>()` — where `name` is the same name passed to `addStorylets()` — it acts as a **group predicate**. It is evaluated once per refresh, before any individual storylet predicates in that group. If it returns false, the entire group is skipped.
+If you define an Ink function whose name is `_<name>()` — where `name` is the same name passed to `addStorylets()` — it acts as a **group predicate**. It is evaluated once per refresh, before any individual storylet predicates in that group. If it returns false, the entire group is skipped. Like individual predicates, it is optional; if absent the group is always active.
 
 This is particularly useful for location- or state-based pools:
 
