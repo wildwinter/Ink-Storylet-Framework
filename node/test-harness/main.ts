@@ -1,6 +1,6 @@
 import { Story } from 'inkjs';
 import { StoryletManager } from '../src/StoryletManager';
-import storyContent from '../../ink/test.ink.json';
+import storyContent from '../../tests/test1/test.ink.json';
 import * as readline from 'readline';
 import path from 'path';
 import { fileURLToPath } from 'url';

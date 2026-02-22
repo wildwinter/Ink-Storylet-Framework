@@ -1,7 +1,7 @@
 import { Story } from 'inkjs';
 import { StoryletManager } from '../src/StoryletManager';
 import { MapManager, MapDef } from './map';
-import storyContent from '../../ink/map-test.ink.json';
+import storyContent from '../../tests/map/map-test.ink.json';
 
 // ---------------------------------------------------------------------------
 // Map setup

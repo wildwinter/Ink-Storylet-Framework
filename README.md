@@ -232,8 +232,8 @@ if (knotName) {
 
 ```bash
 cd browser
-npm run test      # basic test harness (ink/test.ink)
-npm run map-test  # map-based demo   (ink/map-test.ink)
+npm run test      # basic test harness (tests/test1/test.ink)
+npm run map-test  # map-based demo   (tests/map/map-test.ink)
 ```
 
 ---
@@ -371,4 +371,4 @@ cd browser
 npm run map-test
 ```
 
-The Ink source is in [ink/map-test.ink](ink/map-test.ink).
+The Ink source is in [tests/map/map-test.ink](tests/map/map-test.ink).

@@ -1,6 +1,6 @@
 import { Story } from 'inkjs';
 import { StoryletManager } from '../src/StoryletManager';
-import storyContent from '../../ink/test.ink.json';
+import storyContent from '../../tests/test1/test.ink.json';
 
 const logEl = document.getElementById('log')!;
 const statusEl = document.getElementById('status')!;
