@@ -311,7 +311,7 @@ export class StoryletManager {
             console.warn("[StoryletManager] Could not find namedContent");
         }
 
-        console.log("[StoryletManager] All Knot IDs found:", knotList);
+        //console.log("[StoryletManager] All Knot IDs found:", knotList);
         return knotList;
     }
 }
