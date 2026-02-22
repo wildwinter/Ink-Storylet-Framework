@@ -6,7 +6,7 @@ export default defineConfig({
         lib: {
             entry: {
                 StoryletManager: resolve(__dirname, 'src/StoryletManager.ts'),
-                StoryletWorker: resolve(__dirname, 'src/StoryletWorker.ts')
+                StoryletRunner: resolve(__dirname, 'src/StoryletRunner.ts')
             },
             // Formats are overridden by rollupOptions.output
             formats: ['es', 'cjs']
@@ -19,7 +19,6 @@ export default defineConfig({
                 'fs',
                 'path',
                 'events',
-                'worker_threads',
                 'url'
             ],
             output: [

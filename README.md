@@ -85,7 +85,7 @@ VAR current_map = "town"
 ~ return current_map == "world"
 ```
 
-Group predicates that call Ink **external functions** (like `get_map()`) work correctly because they are always evaluated on the main thread, where those functions are bound.
+Group predicates — and all individual storylet predicates — can freely call Ink **external functions** (like `get_map()`), since all evaluation runs on the main thread where those functions are bound.
 
 ---
 
@@ -95,16 +95,21 @@ All three implementations support **named pools** — independent groups of stor
 
 All pool parameters default to `"default"`, so existing single-pool usage requires no changes.
 
+All three implementations share the same two-step refresh pattern: **`refresh()` starts the process** (evaluates group predicates, builds the work queue) and **`tick()` does the incremental work**, firing `onRefreshComplete` once a pool's queue is exhausted. You must drive `tick()` yourself — either via the `runUntilReady` helper or your own game loop.
+
 ```typescript
 // TypeScript / Node example
 manager.addStorylets("encounter", "encounters");
 manager.addStorylets("dialogue", "dialogues");
 
-// Refresh all pools at once, or a specific one
-manager.refresh();             // all pools
-manager.refresh("encounters"); // one pool
+// Refresh all pools at once, or a specific one, then drive tick()
+manager.refresh();               // all pools
+runUntilReady(manager);
 
-// Query a specific pool
+manager.refresh("encounters");   // one pool
+runUntilReady(manager);
+
+// Query a specific pool (only valid once that pool's refresh is complete)
 const available = manager.getPlayableStorylets(false, "encounters");
 const picked    = manager.pickPlayableStorylet("encounters");
 ```
@@ -116,6 +121,10 @@ storyletManager.AddStorylets("dialogue", "dialogues");
 
 storyletManager.Refresh();             // all pools
 storyletManager.Refresh("encounters"); // one pool
+
+// Tick() is called every frame in Update() — it processes the work queues
+// and fires OnRefreshComplete once per pool when that pool is done.
+void Update() { storyletManager.Tick(); }
 
 var available = storyletManager.GetPlayableStorylets(false, "encounters");
 var picked    = storyletManager.PickPlayableStorylet("encounters");
@@ -162,7 +171,7 @@ Tag parsing rules:
 
 ## Usage: TypeScript (Web)
 
-The TypeScript implementation found in the `./browser` directory is designed for the web. It runs the storylet selection logic in a **Web Worker** to prevent blocking the main thread during complex storylet evaluations.
+The TypeScript implementation in `./browser` runs everything on the main thread using an incremental `tick()` pattern — the same approach as the Unity version. This means Ink external functions work correctly for all predicates (group and individual).
 
 ### Installation
 
@@ -177,14 +186,17 @@ npm install inkjs
 ```typescript
 import { Story } from 'inkjs';
 import { StoryletManager } from './path/to/StoryletManager';
+import { runUntilReady } from './path/to/StoryletRunner';
 import storyContent from './your-story.json';
 
-// Initialize Ink Story
+// Initialize Ink Story and bind any external functions before creating the manager
 const story = new Story(storyContent);
+story.BindExternalFunction('get_map', () => mapManager.getCurrentMapName());
+story.BindExternalFunction('set_map', (name: string) => mapManager.setMap(name));
 
-// Initialize Manager (requires path to the worker script).
+// Initialize Manager.
 // Any #storylets: global tags in the Ink file are registered automatically.
-const manager = new StoryletManager(story, './StoryletWorker.js');
+const manager = new StoryletManager(story);
 
 // Optionally register additional storylets in code
 // (not needed if pools are declared via #storylets: global tags)
@@ -199,9 +211,35 @@ manager.onRefreshComplete = (pool: string) => {
     }
 };
 
-// Refresh all pools
+// Refresh all pools, then drive tick() until ready
 manager.refresh();
+runUntilReady(manager);
 ```
+
+### Tick
+
+`tick()` does the incremental work. You have two options:
+
+**Option 1 — `runUntilReady` helper** (simplest, no game loop needed):
+
+```typescript
+manager.refresh();
+runUntilReady(manager); // drives tick() via requestAnimationFrame until areAllReady()
+```
+
+**Option 2 — integrate into your own game loop**:
+
+```typescript
+manager.refresh();
+
+function gameLoop() {
+    manager.tick(); // call each frame; processes storyletsPerTick items per pool
+    requestAnimationFrame(gameLoop);
+}
+requestAnimationFrame(gameLoop);
+```
+
+Adjust the batch size via `manager.storyletsPerTick` (default: `5`).
 
 ### State checks
 
@@ -225,7 +263,22 @@ if (knotName) {
     while (story.canContinue) {
         console.log(story.Continue());
     }
+    // After play, refresh and drive again
+    manager.refresh();
+    runUntilReady(manager);
 }
+```
+
+### Save / Load
+
+`saveAsJson()` returns a plain `string` (synchronous):
+
+```typescript
+const saved = manager.saveAsJson();
+// later...
+manager.loadFromJson(saved);
+manager.refresh();
+runUntilReady(manager);
 ```
 
 ### Running the test harnesses
@@ -240,16 +293,17 @@ npm run map-test  # map-based demo   (tests/map/map-test.ink)
 
 ## Usage: Node.js
 
-The `node` directory contains a specialized implementation for Node.js using `worker_threads`.
+The `node` directory uses the same tick-based approach as the browser version.
 
 ```typescript
 import { Story } from 'inkjs';
 import { StoryletManager } from './StoryletManager'; // path to compiled JS
+import { runUntilReady } from './StoryletRunner';
 
 const story = new Story(storyContent);
 
 // Any #storylets: global tags in the Ink file are registered automatically.
-const manager = new StoryletManager(story, './StoryletWorker.js');
+const manager = new StoryletManager(story);
 
 // Optionally register additional storylets in code
 manager.addStorylets("story");
@@ -263,15 +317,16 @@ manager.onRefreshComplete = (pool: string) => {
     }
 };
 
-// Refresh all pools
+// Refresh all pools, then drive tick() until ready
 manager.refresh();
+runUntilReady(manager); // drives tick() via setImmediate until areAllReady()
 ```
 
 ---
 
 ## Usage: Unity (C#)
 
-The Unity version runs the refresh spread across frames using a `Tick()` method. Any `#storylets:` global tags in the Ink file are parsed and registered automatically in the constructor.
+The Unity version uses the same tick-based pattern. Any `#storylets:` global tags in the Ink file are parsed and registered automatically in the constructor.
 
 ### Unity Setup
 
@@ -357,14 +412,14 @@ npm run compile-ink
 
 ## Map-Test Demo
 
-`browser/map-test/` is a full interactive demo showing location-based storylets using the tag system and group predicates. It demonstrates:
+`browser/map-test/` is a full interactive demo showing location-based storylets using the tag system, group predicates, and Ink external functions. It demonstrates:
 
 * Three pools (`main`, `cave`, `wizard`) gated by group predicates (`_main()`, `_cave()`, `_wizard()`)
 * `#loc: <id>` tags on storylets to associate them with map locations
 * `#desc: <text>` tags shown in map tooltips
 * `getPlayableStoryletsWithTag()` to find what's available at each location
 * `getFirstPlayableStoryletWithTag()` to handle location clicks
-* External Ink functions (`set_map`, `get_map`) integrated with the map UI
+* External Ink functions (`set_map`, `get_map`) used in both group and individual predicates
 
 ```bash
 cd browser

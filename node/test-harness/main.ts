@@ -1,11 +1,8 @@
 import { Story } from 'inkjs';
 import { StoryletManager } from '../src/StoryletManager';
+import { runUntilReady } from '../src/StoryletRunner';
 import storyContent from '../../tests/test1/test.ink.json';
 import * as readline from 'readline';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Create readline interface
 const rl = readline.createInterface({
@@ -24,19 +21,10 @@ async function main() {
     try {
         log('Initializing StoryletManager...', 'info');
 
-        // Verify the ink story loads
         // @ts-ignore
         const story = new Story(storyContent);
 
-        // Point to the BUILT worker because Node's Worker thread needs a JS file.
-        // We use the CJS build for maximum compatibility in this test,
-        // though ES build might work if configured with type:module.
-        // Going up from node/test-harness/main.ts -> node/test-harness -> node -> build/cjs/StoryletWorker.js
-        const workerPath = path.resolve(__dirname, '../build/cjs/StoryletWorker.js');
-
-        log(`Worker Path: ${workerPath}`, 'info');
-
-        const manager = new StoryletManager(story, workerPath);
+        const manager = new StoryletManager(story);
 
         // onRefreshComplete now receives the pool name that just finished refreshing.
         manager.onRefreshComplete = (pool: string) => {
@@ -58,6 +46,7 @@ async function main() {
 
         log('Manager initialized. Refreshing all pools...', 'success');
         manager.refresh();
+        runUntilReady(manager);
 
     } catch (e: any) {
         log(`Error: ${e.message}`, 'error');
@@ -71,12 +60,12 @@ function promptUser(manager: StoryletManager, story: Story) {
 
         if (choice === 'q') {
             log('Exiting...', 'info');
-            manager.terminate();
             rl.close();
             process.exit(0);
         } else if (choice === 'r') {
             log('Requesting Refresh (all pools)...', 'info');
-            manager.refresh(); // refreshes all pools; onRefreshComplete fires once per pool
+            manager.refresh();
+            runUntilReady(manager);
         } else if (choice === 'p') {
             if (!manager.isReady()) {
                 log('Manager not ready.', 'error');
@@ -130,6 +119,7 @@ function continueStory(story: Story, manager: StoryletManager) {
         log("Storylet finished.", 'info');
         // Auto-refresh all pools after play
         manager.refresh();
+        runUntilReady(manager);
     }
 }
 

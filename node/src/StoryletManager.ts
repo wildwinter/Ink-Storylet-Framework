@@ -1,58 +1,47 @@
 import { Story } from 'inkjs';
-import type { WorkerMessage, WorkerResponse } from './StoryletWorker';
 
 declare var require: any;
-declare var process: any;
 
 const DEFAULT_POOL = 'default';
 
 interface PoolState {
+    deck: Map<string, Storylet>;
+    refreshList: Storylet[];
     hand: string[];
     handWeighted: string[];
     state: State;
+}
+
+class Storylet {
+    public knotID: string;
+    public played: boolean = false;
+    public once: boolean = false;
+    public groupPredicate: string | null = null;
+
+    constructor(knotID: string) {
+        this.knotID = knotID;
+    }
 }
 
 export class StoryletManager {
     /** Called once per pool each time that pool's refresh completes. */
     public onRefreshComplete: ((pool: string) => void) | null = null;
 
+    /**
+     * Number of storylet predicates evaluated per tick() call, per refreshing pool.
+     * Raise for faster completion; lower for smoother event-loop budgets.
+     * Default: 5.
+     */
+    public storyletsPerTick: number = 5;
+
     private _story: Story;
-    private _worker: any; // Node Worker type is dynamic
     private _pools: Map<string, PoolState> = new Map();
 
     // Tag cache: knotID -> { tagName -> value }
     private _storyletTags: Map<string, Record<string, any>> = new Map();
 
-    // All group predicate function names registered across all addStorylets() calls.
-    // These are evaluated on the main thread (where external Ink functions are bound)
-    // and sent to the worker as groupOverrides during each refresh.
-    private _groupPredicates: Set<string> = new Set();
-
-    constructor(story: Story, workerPath: string = './StoryletWorker.js') {
+    constructor(story: Story) {
         this._story = story;
-
-        let Worker;
-        try {
-            Worker = require('worker_threads').Worker;
-        } catch (e) {
-            throw new Error("StoryletManager (Node): 'worker_threads' module not found. Ensure you are running in Node.js.");
-        }
-
-        const worker = new Worker(workerPath);
-        this._worker = worker;
-
-        // Node workers use .on('message'), not .onmessage
-        worker.on('message', (data: any) => {
-            this.handleWorkerMessage({ data } as MessageEvent);
-        });
-
-        worker.on('error', (err: any) => console.error("Worker Error:", err));
-
-        this.postMessage({
-            type: 'INIT',
-            storyContent: story.ToJson()
-        });
-
         this.addStoryletsFromGlobalTags();
     }
 
@@ -104,9 +93,9 @@ export class StoryletManager {
         // Determine group predicate (optional — only used if the function exists)
         const groupPredFn = '_' + name;
         const groupPredicate = knotIDs.includes(groupPredFn) ? groupPredFn : null;
-        if (groupPredicate) this._groupPredicates.add(groupPredicate);
 
-        const discovered: { knotID: string; once: boolean; groupPredicate: string | null }[] = [];
+        const poolState = this.getOrCreatePoolState(pool);
+        const discovered: string[] = [];
 
         for (const knotID of knotIDs) {
             if (!knotID.startsWith(prefix)) continue;
@@ -127,46 +116,65 @@ export class StoryletManager {
             const tags = parseTags(rawTags ?? []);
             this._storyletTags.set(knotID, tags);
 
-            discovered.push({
-                knotID,
-                once: tags['once'] === true,
-                groupPredicate
-            });
+            const storylet = new Storylet(knotID);
+            storylet.once = tags['once'] === true;
+            storylet.groupPredicate = groupPredicate;
+            poolState.deck.set(knotID, storylet);
+            discovered.push(knotID);
         }
 
-        console.log(`[StoryletManager] Discovered ${discovered.length} storylets for pool "${pool}" (name="${name}"):`, discovered.map(d => d.knotID));
-
-        this.getOrCreatePoolState(pool);
-
-        this.postMessage({
-            type: 'REGISTER_STORYLETS',
-            pool,
-            storylets: discovered
-        });
+        console.log(`[StoryletManager] Discovered ${discovered.length} storylets for pool "${pool}" (name="${name}"):`, discovered);
     }
 
     // --- Refresh ---
 
     /**
-     * Refresh a specific pool, or all registered pools if no pool is specified.
-     * Group predicates are evaluated here on the main thread (where external Ink functions
-     * are bound), then the results are forwarded to the worker along with the story state.
-     * onRefreshComplete fires once per pool as each finishes.
+     * Start a refresh for a specific pool, or all registered pools if none specified.
+     * Builds the refresh list synchronously (group predicates evaluated here, where
+     * external Ink functions are bound), then sets state to REFRESHING.
+     * Call tick() regularly to process the list. onRefreshComplete fires per pool.
      */
     public refresh(pool?: string): void {
-        const groupOverrides = this.evaluateGroupPredicates();
-        const stateJson = this._story.state.ToJson();
-
         if (pool !== undefined) {
             const poolState = this.getOrCreatePoolState(pool);
             if (poolState.state === State.REFRESHING) return;
+            poolState.hand = [];
+            poolState.handWeighted = [];
+            poolState.refreshList = this.buildRefreshList(poolState);
             poolState.state = State.REFRESHING;
-            this.postMessage({ type: 'REFRESH', stateJson, pool, groupOverrides });
         } else {
             for (const poolState of this._pools.values()) {
+                poolState.hand = [];
+                poolState.handWeighted = [];
+                poolState.refreshList = this.buildRefreshList(poolState);
                 poolState.state = State.REFRESHING;
             }
-            this.postMessage({ type: 'REFRESH', stateJson, groupOverrides });
+        }
+    }
+
+    /**
+     * Process up to storyletsPerTick items per refreshing pool.
+     * Must be called regularly after refresh().
+     * Fires onRefreshComplete once per pool when that pool's list is exhausted.
+     */
+    public tick(): void {
+        for (const [poolName, poolState] of this._pools) {
+            if (poolState.state !== State.REFRESHING) continue;
+
+            const count = Math.min(this.storyletsPerTick, poolState.refreshList.length);
+            for (let i = 0; i < count; i++) {
+                const storylet = poolState.refreshList.shift()!;
+                const w = this.getWeighting(storylet);
+                if (w > 0) {
+                    poolState.hand.push(storylet.knotID);
+                    for (let j = 0; j < w; j++) poolState.handWeighted.push(storylet.knotID);
+                }
+            }
+
+            if (poolState.refreshList.length === 0) {
+                poolState.state = State.REFRESH_COMPLETE;
+                if (this.onRefreshComplete) this.onRefreshComplete(poolName);
+            }
         }
     }
 
@@ -206,15 +214,20 @@ export class StoryletManager {
     }
 
     /**
-     * Mark a storylet as played. If pool is omitted, the message is sent to all registered
-     * pools — safe since the worker ignores unknown knotIDs.
+     * Mark a storylet as played. If pool is omitted, all pools are searched
+     * (safe — unknown knotIDs are silently ignored).
      */
     public markPlayed(knotID: string, pool?: string): void {
         if (pool !== undefined) {
-            this.postMessage({ type: 'MARK_PLAYED', pool, knotID });
+            const poolState = this._pools.get(pool);
+            if (poolState) {
+                const s = poolState.deck.get(knotID);
+                if (s) s.played = true;
+            }
         } else {
-            for (const poolName of this._pools.keys()) {
-                this.postMessage({ type: 'MARK_PLAYED', pool: poolName, knotID });
+            for (const poolState of this._pools.values()) {
+                const s = poolState.deck.get(knotID);
+                if (s) s.played = true;
             }
         }
     }
@@ -275,106 +288,120 @@ export class StoryletManager {
     public reset(pool?: string): void {
         if (pool !== undefined) {
             const poolState = this._pools.get(pool);
-            if (poolState) {
-                poolState.hand = [];
-                poolState.handWeighted = [];
-                poolState.state = State.NEEDS_REFRESH;
-            }
+            if (poolState) resetPoolState(poolState);
         } else {
             for (const poolState of this._pools.values()) {
-                poolState.hand = [];
-                poolState.handWeighted = [];
-                poolState.state = State.NEEDS_REFRESH;
+                resetPoolState(poolState);
             }
         }
-        this.postMessage({ type: 'RESET', pool });
     }
 
     // --- Save / Load ---
 
-    public saveAsJson(): Promise<string> {
-        return new Promise((resolve) => {
-            const nodeHandler = (data: any) => {
-                if (data.type === 'SAVE_DATABOLT') {
-                    this._worker.off('message', nodeHandler);
-                    resolve(data.json);
-                }
-            };
-            this._worker.on('message', nodeHandler);
-            this._worker.postMessage({ type: 'SAVE_DATABOLT' });
-        });
+    /**
+     * Returns a JSON string encoding the played state of all pools.
+     * Format: { "poolName": [["knotID", played], ...], ... }
+     * Save the Ink story state separately via story.state.ToJson().
+     */
+    public saveAsJson(): string {
+        const data: Record<string, [string, boolean][]> = {};
+        for (const [poolName, poolState] of this._pools) {
+            data[poolName] = [];
+            for (const s of poolState.deck.values()) {
+                data[poolName].push([s.knotID, s.played]);
+            }
+        }
+        return JSON.stringify(data);
     }
 
+    /** Restore played state from a saveAsJson() string. */
     public loadFromJson(json: string): void {
         this.reset();
-        this.postMessage({ type: 'LOAD_DATABOLT', json });
-    }
-
-    public terminate(): void {
-        this._worker.terminate();
+        const data: Record<string, [string, boolean][]> = JSON.parse(json);
+        for (const [poolName, entries] of Object.entries(data)) {
+            const poolState = this._pools.get(poolName);
+            if (poolState) {
+                for (const [knotID, played] of entries) {
+                    const s = poolState.deck.get(knotID);
+                    if (s) s.played = played;
+                }
+            }
+        }
     }
 
     // --- Private ---
 
     private getOrCreatePoolState(pool: string): PoolState {
         if (!this._pools.has(pool)) {
-            this._pools.set(pool, { hand: [], handWeighted: [], state: State.NEEDS_REFRESH });
+            this._pools.set(pool, {
+                deck: new Map(),
+                refreshList: [],
+                hand: [],
+                handWeighted: [],
+                state: State.NEEDS_REFRESH
+            });
         }
         return this._pools.get(pool)!;
     }
 
     private getPoolState(pool: string): PoolState {
-        return this._pools.get(pool) ?? { hand: [], handWeighted: [], state: State.NEEDS_REFRESH };
-    }
-
-    private postMessage(msg: WorkerMessage) {
-        this._worker.postMessage(msg);
-    }
-
-    private handleWorkerMessage(event: MessageEvent<WorkerResponse>) {
-        const msg = event.data;
-        switch (msg.type) {
-            case 'INIT_COMPLETE':
-                break;
-            case 'REFRESH_COMPLETE': {
-                const poolState = this.getOrCreatePoolState(msg.pool);
-                poolState.hand = msg.hand;
-                poolState.handWeighted = msg.handWeighted;
-                poolState.state = State.REFRESH_COMPLETE;
-                if (this.onRefreshComplete) this.onRefreshComplete(msg.pool);
-                break;
-            }
-            case 'ERROR':
-                console.error("StoryletManager Worker Error:", msg.message);
-                break;
-        }
+        return this._pools.get(pool) ?? {
+            deck: new Map(),
+            refreshList: [],
+            hand: [],
+            handWeighted: [],
+            state: State.NEEDS_REFRESH
+        };
     }
 
     /**
-     * Evaluate all registered group predicates on the main thread.
-     * This is done here rather than in the worker so that Ink external functions
-     * (e.g. get_map()) are available during evaluation.
-     * EvaluateFunction() is non-destructive — it saves and restores story state internally.
+     * Evaluate group predicates (on the main thread, where external functions are bound),
+     * then return the subset of the pool's deck that should be evaluated this refresh.
      */
-    private evaluateGroupPredicates(): Record<string, boolean> {
-        const results: Record<string, boolean> = {};
-        for (const gp of this._groupPredicates) {
-            try {
-                const retVal = this._story.EvaluateFunction(gp);
-                if (typeof retVal === 'boolean') results[gp] = retVal;
-                else if (typeof retVal === 'number') results[gp] = retVal > 0;
-                else results[gp] = false;
-            } catch (_e) {
-                results[gp] = true; // Missing function → group always active
+    private buildRefreshList(poolState: PoolState): Storylet[] {
+        const groupResults: Record<string, boolean> = {};
+        for (const storylet of poolState.deck.values()) {
+            const gp = storylet.groupPredicate;
+            if (gp && !(gp in groupResults)) {
+                let active = true;
+                try {
+                    const retVal = this._story.EvaluateFunction(gp);
+                    if (typeof retVal === 'boolean') active = retVal;
+                    else if (typeof retVal === 'number') active = retVal > 0;
+                } catch (_e) {
+                    active = true; // Missing function → group always active
+                }
+                groupResults[gp] = active;
             }
         }
-        return results;
+
+        const list: Storylet[] = [];
+        for (const storylet of poolState.deck.values()) {
+            const gp = storylet.groupPredicate;
+            if (gp && gp in groupResults && !groupResults[gp]) continue;
+            list.push(storylet);
+        }
+        return list;
+    }
+
+    private getWeighting(storylet: Storylet): number {
+        if (storylet.played && storylet.once) return 0;
+
+        let retVal;
+        try {
+            retVal = this._story.EvaluateFunction('_' + storylet.knotID);
+        } catch (_e) {
+            return 0;
+        }
+
+        if (typeof retVal === 'boolean') return retVal ? 1 : 0;
+        if (typeof retVal === 'number') return Math.floor(retVal);
+        return 0;
     }
 
     /**
      * Parse #storylets: global tags and call addStorylets() for each.
      * Tag format: #storylets:name  or  #storylets:name,poolName
-     * The bare name (without trailing underscore) is passed; the underscore is inferred.
      */
     private addStoryletsFromGlobalTags(): void {
         const tags = this._story.globalTags;
@@ -402,7 +429,6 @@ export class StoryletManager {
         const namedContent = mainContentContainer.namedOnlyContent || mainContentContainer.namedContent;
 
         if (namedContent) {
-            // Check if it's a Map (inkjs > 2.0 uses Map)
             // @ts-ignore
             if (namedContent instanceof Map || (typeof namedContent.keys === 'function' && typeof namedContent.get === 'function')) {
                 // @ts-ignore
@@ -411,7 +437,6 @@ export class StoryletManager {
                     knotList.push(name);
                 }
             } else {
-                // Assume Object (old versions)
                 for (const name of Object.keys(namedContent)) {
                     if (name === "global decl") continue;
                     knotList.push(name);
@@ -429,6 +454,14 @@ enum State {
     NEEDS_REFRESH,
     REFRESHING,
     REFRESH_COMPLETE
+}
+
+function resetPoolState(poolState: PoolState): void {
+    for (const s of poolState.deck.values()) s.played = false;
+    poolState.refreshList = [];
+    poolState.hand = [];
+    poolState.handWeighted = [];
+    poolState.state = State.NEEDS_REFRESH;
 }
 
 /**

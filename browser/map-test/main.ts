@@ -1,5 +1,6 @@
 import { Story } from 'inkjs';
 import { StoryletManager } from '../src/StoryletManager';
+import { runUntilReady } from '../src/StoryletRunner';
 import { MapManager, MapDef } from './map';
 import storyContent from '../../tests/map/map-test.ink.json';
 
@@ -60,8 +61,7 @@ story.BindExternalFunction('get_map', () => {
 // so pools are registered automatically from those global tags.
 // ---------------------------------------------------------------------------
 
-const workerUrl = new URL('../src/StoryletWorker.ts', import.meta.url).href;
-const manager = new StoryletManager(story, workerUrl);
+const manager = new StoryletManager(story);
 
 // onRefreshComplete fires once per pool. Once all pools are ready, update the map.
 manager.onRefreshComplete = (_pool: string) => {
@@ -82,6 +82,7 @@ document.getElementById('reset-container')!.appendChild(resetButton);
 
 // Kick off the first refresh
 manager.refresh();
+runUntilReady(manager);
 
 // ---------------------------------------------------------------------------
 // Map / storylet logic
@@ -113,7 +114,7 @@ function onAllPoolsReady() {
 function chooseStorylet(knotID: string) {
     mapManager.lockMap();
 
-    // Mark as played (no pool specified → sent to all pools; worker ignores unknown IDs)
+    // Mark as played (no pool specified → all pools searched; unknown IDs ignored)
     manager.markPlayed(knotID);
 
     // Show the storylet title as a heading
@@ -140,6 +141,7 @@ function runInk() {
         scrollToBottom();
         mapManager.unlockMap();
         manager.refresh();
+        runUntilReady(manager);
         return;
     }
 
@@ -169,6 +171,7 @@ function reset() {
     mapManager.unlockMap();
     storyRoot.innerHTML = '';
     manager.refresh();
+    runUntilReady(manager);
 }
 
 function scrollToBottom() {

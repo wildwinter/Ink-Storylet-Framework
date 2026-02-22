@@ -1,5 +1,6 @@
 import { Story } from 'inkjs';
 import { StoryletManager } from '../src/StoryletManager';
+import { runUntilReady } from '../src/StoryletRunner';
 import storyContent from '../../tests/test1/test.ink.json';
 
 const logEl = document.getElementById('log')!;
@@ -23,9 +24,7 @@ function init() {
     try {
         log('Initializing StoryletManager...', 'info');
 
-        const workerUrl = new URL('../src/StoryletWorker.ts', import.meta.url).href;
-
-        manager = new StoryletManager(story, workerUrl);
+        manager = new StoryletManager(story);
 
         // onRefreshComplete now receives the pool name that just finished refreshing.
         manager.onRefreshComplete = (pool: string) => {
@@ -46,6 +45,7 @@ function init() {
         log('Manager initialized. Refreshing all pools...', 'success');
         statusEl.textContent = 'Status: Initialized';
         manager.refresh();
+        runUntilReady(manager);
 
     } catch (e: any) {
         log(`Error: ${e.message}`, 'error');
@@ -63,6 +63,7 @@ document.getElementById('btn-refresh')!.addEventListener('click', () => {
     log('Requesting Refresh (all pools)...', 'info');
     statusEl.textContent = 'Status: Refreshing...';
     manager.refresh();
+    runUntilReady(manager);
 });
 
 document.getElementById('btn-pick')!.addEventListener('click', () => {
@@ -111,7 +112,10 @@ function continueStory() {
     } else {
         log("Storylet finished. Refreshing...", 'info');
         statusEl.textContent = 'Status: Refreshing...';
-        if (manager) manager.refresh();
+        if (manager) {
+            manager.refresh();
+            runUntilReady(manager);
+        }
     }
 }
 

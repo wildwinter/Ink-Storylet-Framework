@@ -6,7 +6,7 @@ export default defineConfig({
         lib: {
             entry: {
                 StoryletManager: resolve(__dirname, 'src/StoryletManager.ts'),
-                StoryletWorker: resolve(__dirname, 'src/StoryletWorker.ts')
+                StoryletRunner: resolve(__dirname, 'src/StoryletRunner.ts')
             }
         },
         rollupOptions: {
