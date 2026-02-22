@@ -1,3 +1,5 @@
+#storylets:story_
+
 // Note that this var could be altered
 // in Ink or by a binding to the game
 // state in Unity.

@@ -38,8 +38,8 @@ function init() {
         };
 
         // Test addStorylets
-        log('Scanning and adding storylets with prefix "story_" into the default pool...', 'info');
-        manager.addStorylets("story_");
+        //log('Scanning and adding storylets with prefix "story_" into the default pool...', 'info');
+        //manager.addStorylets("story_");
         // Example of adding a second pool — uncomment and add matching knots to your ink file:
         // manager.addStorylets("encounter_", "encounters");
 
