@@ -1,0 +1,108 @@
+{
+  "source": "main.ink",
+  "destFolder": ".",
+  "defaultLocaleCode": "en-GB",
+  "locActions": false,
+  "nostrip": true,
+  "outputDinkStructure": false,
+  "outputLocalization": false,
+  "outputRecordingScript": false,
+  "ignoreWritingStatus": false,
+  "outputStats": false,
+  "audioStatus": [
+    {
+      "status": "Final",
+      "folder": "Audio/Final",
+      "color": "33FF33",
+      "recorded": true
+    },
+    {
+      "status": "Recorded",
+      "folder": "Audio/Recorded",
+      "color": "FFFF33",
+      "recorded": true
+    },
+    {
+      "status": "Scratch",
+      "folder": "Audio/Scratch",
+      "color": "FF8833"
+    },
+    {
+      "status": "TTS",
+      "folder": "Audio/TTS",
+      "color": "FF3333"
+    }
+  ],
+  "writingStatus": [
+    {
+      "status": "Final",
+      "wstag": "final",
+      "record": true,
+      "loc": true,
+      "color": "33FF33"
+    },
+    {
+      "status": "Second Draft",
+      "wstag": "draft2",
+      "color": "FFFF33"
+    },
+    {
+      "status": "First Draft",
+      "wstag": "draft1",
+      "color": "FF8833"
+    },
+    {
+      "status": "Stub",
+      "wstag": "stub",
+      "color": "FF3333",
+      "estimate": true
+    }
+  ],
+  "commentFilters": {
+    "loc": [
+      "?",
+      "LOC"
+    ],
+    "record": [
+      "?",
+      "VO"
+    ]
+  },
+  "tagFilters": {
+    "record": [
+      "vo"
+    ]
+  },
+  "googleTTS": {
+    "generate": false,
+    "authentication": "google-tts-key.json",
+    "outputFolder": "Audio/TTS"
+  },
+  "estimates": [
+    {
+      "tag": "type:conversation",
+      "lines": 50
+    },
+    {
+      "tag": "type:barks",
+      "lines": 20
+    },
+    {
+      "tag": "type:ambients",
+      "lines": 2
+    },
+    {
+      "tag": "type:cutscene",
+      "lines": 10
+    }
+  ],
+  "dinky": {
+    "spellCheckerLocale": "en-GB",
+    "scratchAudioEnabled": true,
+    "scratchAudioFolder": "Audio/Scratch",
+    "scratchAudioFormat": "wav"
+  },
+  "outputPot": false,
+  "poDir": "loc",
+  "poLangs": []
+}

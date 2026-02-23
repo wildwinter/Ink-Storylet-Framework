@@ -52,7 +52,7 @@ The predicate can return:
 
 * `#once`: applied to a knot. If this tag is present, the storylet will be discarded from the deck after it is played successfully. Otherwise, it remains in the deck and can be selected again.
 
-* `#storylets:name` / `#storylets:name,pool`: applied as a **global tag** (at the very top of an Ink file). Registers a pool of storylets automatically when the `StoryletManager` is created, without any extra code. Multiple tags can be used to register multiple pools.
+* `#storylets:name` / `#storylets:name,pool`: applied as a **global tag** (at the very top of the main Ink file). Registers a pool of storylets automatically when the `StoryletManager` is created, without any extra code. Multiple tags can be used to register multiple pools.
 
 ```ink
 #storylets:story
