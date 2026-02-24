@@ -15,6 +15,7 @@ class Storylet {
     public played: boolean = false;
     public once: boolean = false;
     public groupPredicate: string | null = null;
+    public fnPredicate: ((knotID: string) => boolean | number) | null = null;
 
     constructor(knotID: string) {
         this.knotID = knotID;
@@ -224,6 +225,52 @@ export class StoryletManager {
         }
     }
 
+    // --- JS predicate registration ---
+
+    /**
+     * Iterate over every registered storylet, calling `callback` with the knotID and
+     * its parsed tags. Use this after all addStorylets() calls to inspect storylets and
+     * attach JS predicates via setStoryletPredicate().
+     *
+     * If `pool` is provided only that pool is iterated; otherwise all pools are iterated.
+     */
+    public forEachStorylet(
+        callback: (knotID: string, tags: Record<string, any>) => void,
+        pool?: string
+    ): void {
+        const poolNames = pool !== undefined ? [pool] : Array.from(this._pools.keys());
+        for (const p of poolNames) {
+            const poolState = this._pools.get(p);
+            if (!poolState) continue;
+            for (const storylet of poolState.deck.values()) {
+                callback(storylet.knotID, this._storyletTags.get(storylet.knotID) ?? {});
+            }
+        }
+    }
+
+    /**
+     * Attach a JS predicate function to a storylet. The predicate is called during
+     * getWeighting() after the played/once check but before the Ink predicate function.
+     * If it returns false or 0 the storylet is excluded from the hand; any positive
+     * number or true lets evaluation continue to the Ink predicate.
+     *
+     * Pass null to remove a previously attached predicate.
+     * Searches all pools (knotIDs are expected to be unique across pools).
+     */
+    public setStoryletPredicate(
+        knotID: string,
+        predicate: ((knotID: string) => boolean | number) | null
+    ): void {
+        for (const poolState of this._pools.values()) {
+            const storylet = poolState.deck.get(knotID);
+            if (storylet) {
+                storylet.fnPredicate = predicate;
+                return;
+            }
+        }
+        console.warn(`[StoryletManager] setStoryletPredicate: knotID "${knotID}" not found`);
+    }
+
     // --- Tag queries ---
 
     /**
@@ -379,6 +426,13 @@ export class StoryletManager {
 
     private getWeighting(storylet: Storylet): number {
         if (storylet.played && storylet.once) return 0;
+
+        if (storylet.fnPredicate !== null) {
+            const jsResult = storylet.fnPredicate(storylet.knotID);
+            if (typeof jsResult === 'boolean') { if (!jsResult) return 0; }
+            else if (typeof jsResult === 'number') { if (jsResult <= 0) return 0; }
+            else return 0;
+        }
 
         let retVal;
         try {

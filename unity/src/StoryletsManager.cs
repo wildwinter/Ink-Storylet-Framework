@@ -235,6 +235,47 @@ namespace InkStoryletFramework
             return knotID;
         }
 
+        // Iterate over every registered storylet, calling callback with the knotID and
+        // its parsed tags. Use this after all AddStorylets() calls to inspect storylets
+        // and attach predicates via SetStoryletPredicate().
+        //
+        // If pool is provided only that pool is iterated; otherwise all pools are iterated.
+        public void ForEachStorylet(Action<string, Dictionary<string, object>> callback, string pool = null)
+        {
+            IEnumerable<PoolState> poolsToSearch = (pool != null)
+                ? (_pools.TryGetValue(pool, out PoolState ps) ? new[] { ps } : Array.Empty<PoolState>())
+                : (IEnumerable<PoolState>)_pools.Values;
+
+            foreach (PoolState poolState in poolsToSearch)
+            {
+                foreach (Storylet storylet in poolState.Deck.Values)
+                {
+                    _storyletTags.TryGetValue(storylet.knotID, out Dictionary<string, object> tags);
+                    callback(storylet.knotID, tags ?? new Dictionary<string, object>());
+                }
+            }
+        }
+
+        // Attach a predicate function to a storylet. The predicate is called during
+        // GetWeighting() after the played/once check but before the Ink predicate function.
+        // If it returns false or 0 the storylet is excluded from the hand; any positive
+        // int or true lets evaluation continue to the Ink predicate.
+        //
+        // Pass null to remove a previously attached predicate.
+        // Searches all pools (knotIDs are expected to be unique across pools).
+        public void SetStoryletPredicate(string knotID, Func<string, object> predicate)
+        {
+            foreach (PoolState poolState in _pools.Values)
+            {
+                if (poolState.Deck.TryGetValue(knotID, out Storylet storylet))
+                {
+                    storylet.FnPredicate = predicate;
+                    return;
+                }
+            }
+            Debug.LogWarning($"[StoryletsManager] SetStoryletPredicate: knotID \"{knotID}\" not found");
+        }
+
         // Returns the value of a named tag on a storylet knot, or defaultValue if absent.
         // Tag names are case-insensitive. Values are parsed at registration time:
         //   - "true"/"false" strings become booleans
@@ -452,6 +493,14 @@ namespace InkStoryletFramework
             if (storylet.played && storylet.once)
                 return 0;
 
+            if (storylet.FnPredicate != null)
+            {
+                object fnResult = storylet.FnPredicate(storylet.knotID);
+                if (fnResult is bool fnBool) { if (!fnBool) return 0; }
+                else if (fnResult is int fnInt) { if (fnInt <= 0) return 0; }
+                else return 0;
+            }
+
             object retVal;
             try
             {
@@ -539,6 +588,7 @@ namespace InkStoryletFramework
             internal bool played;
             internal bool once;
             internal string GroupPredicate; // null if no group predicate
+            internal Func<string, object> FnPredicate; // null if no JS predicate
 
             internal Storylet(string knotID)
             {
