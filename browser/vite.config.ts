@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, PluginOption } from 'vite';
 import { resolve } from 'path';
 import dts from 'vite-plugin-dts';
 
@@ -9,7 +9,7 @@ export default defineConfig({
             outDir: 'build/es',
             // It will generate types in build/es. 
             // `package.json` "types" points to "./build/es/StoryletManager.d.ts"
-        })
+        }) as PluginOption
     ],
     build: {
         lib: {
