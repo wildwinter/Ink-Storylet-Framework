@@ -1,14 +1,15 @@
 {
   "name": "ink-storylet-framework",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "A simple storylet framework for Ink.",
   "scripts": {
     "build-unity": "cd unity && npm run build",
-    "build-browser": "cd browser && npm run build",
+    "build-browser": "cd browser && npm version $npm_package_version --no-git-tag-version --allow-same-version && npm run build",
     "build-node": "cd node && npm run build",
     "compile-ink": "node browser/node_modules/inkjs/bin/inkjs-compiler.js tests/test1/test.ink -o tests/test1/test.ink.json && node browser/node_modules/inkjs/bin/inkjs-compiler.js tests/map/map-test.ink -o tests/map/map-test.ink.json",
     "build": "npm run build-browser && npm run build-node && npm run build-unity",
-    "dist": "npm run build && rm -rf dist/v$npm_package_version && mkdir -p dist/v$npm_package_version && zip -r dist/v$npm_package_version/$npm_package_name-browser-v$npm_package_version.zip ./browser/build && zip -r dist/v$npm_package_version/$npm_package_name-node-v$npm_package_version.zip ./node/build && zip -r dist/v$npm_package_version/$npm_package_name-unity-v$npm_package_version.zip ./unity/build"
+    "dist": "npm run build && rm -rf dist/v$npm_package_version && mkdir -p dist/v$npm_package_version && zip -r dist/v$npm_package_version/$npm_package_name-browser-v$npm_package_version.zip ./browser/build && zip -r dist/v$npm_package_version/$npm_package_name-node-v$npm_package_version.zip ./node/build && zip -r dist/v$npm_package_version/$npm_package_name-unity-v$npm_package_version.zip ./unity/build",
+    "publish-npm": "npm run build-browser && cd browser && npm publish"
   },
   "keywords": [
     "ink",

@@ -171,22 +171,22 @@ Tag parsing rules:
 
 ## Usage: TypeScript (Web)
 
-The TypeScript implementation in `./browser` runs everything on the main thread using an incremental `tick()` pattern — the same approach as the Unity version. This means Ink external functions work correctly for all predicates (group and individual).
+The JS version of the framework is now available via npm and runs identically in the browser or Node.js. It runs everything on the main thread using an incremental `tick()` pattern — the same approach as the Unity version. This means Ink external functions work correctly for all predicates (group and individual).
 
 ### Installation
 
-Ensure you have `inkjs` installed.
+Ensure you have `inkjs` installed alongside the framework.
 
 ```bash
-npm install inkjs
+npm install inkjs ink-storylet-framework
 ```
 
 ### Setup
 
 ```typescript
 import { Story } from 'inkjs';
-import { StoryletManager } from './path/to/StoryletManager';
-import { runUntilReady } from './path/to/StoryletRunner';
+import { StoryletManager } from 'ink-storylet-framework';
+import { runUntilReady } from 'ink-storylet-framework/runner';
 import storyContent from './your-story.json';
 
 // Initialize Ink Story and bind any external functions before creating the manager
@@ -293,12 +293,12 @@ npm run map-test  # map-based demo   (tests/map/map-test.ink)
 
 ## Usage: Node.js
 
-The `node` directory uses the same tick-based approach as the browser version.
+The node implementation uses the exact same npm package and `tick()` based pattern as the browser.
 
 ```typescript
 import { Story } from 'inkjs';
-import { StoryletManager } from './StoryletManager'; // path to compiled JS
-import { runUntilReady } from './StoryletRunner';
+import { StoryletManager } from 'ink-storylet-framework';
+import { runUntilReady } from 'ink-storylet-framework/runner';
 
 const story = new Story(storyContent);
 
