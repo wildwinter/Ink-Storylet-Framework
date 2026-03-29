@@ -1,34 +1,11 @@
 {
-  "name": "ink-storylet-framework",
+  "name": "ink-storylet-framework-browser",
   "version": "0.0.8",
-  "description": "A simple storylet framework for Ink.",
-  "main": "./build/cjs/StoryletManager.js",
-  "module": "./build/es/StoryletManager.js",
-  "types": "./build/es/StoryletManager.d.ts",
-  "exports": {
-    ".": {
-      "types": "./build/es/StoryletManager.d.ts",
-      "require": "./build/cjs/StoryletManager.js",
-      "import": "./build/es/StoryletManager.js",
-      "default": "./build/es/StoryletManager.js"
-    },
-    "./runner": {
-      "types": "./build/es/StoryletRunner.d.ts",
-      "require": "./build/cjs/StoryletRunner.js",
-      "import": "./build/es/StoryletRunner.js",
-      "default": "./build/es/StoryletRunner.js"
-    }
-  },
-  "files": [
-    "build",
-    "src",
-    "README.md",
-    "LICENSE"
-  ],
+  "private": true,
   "scripts": {
     "test": "npx vite test-harness",
     "map-test": "npx vite map-test",
-    "build": "rm -rf build && vite build && cp ../README.md . && cp ../LICENSE ."
+    "build": "rm -rf build && vite build"
   },
   "dependencies": {
     "inkjs": "^2.3.2",

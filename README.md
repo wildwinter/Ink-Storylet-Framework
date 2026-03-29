@@ -4,11 +4,10 @@ A simple **storylet** framework for Ink.
 
 See my medium post - [over here](https://wildwinter.medium.com/an-ink-unity-storylet-framework-3b2cc0910b3) - for the general principles of the framework.
 
-There are now three versions of the framework:
+There are now two main distributions of the framework:
 
 1. The original Unity version, which can be found in the `unity` directory.
-2. The TypeScript (Browser) version, which can be found in the `browser` directory.
-3. The TypeScript (Node.js) version, which can be found in the `node` directory.
+2. The JS/TS NPM package (`ink-storylet-framework`) which universally supports both Browser and Node.js environments.
 
 ## What is a Storylet System?
 
@@ -169,9 +168,9 @@ Tag parsing rules:
 
 ---
 
-## Usage: TypeScript (Web)
+## Usage: TypeScript / JavaScript
 
-The JS version of the framework is now available via npm and runs identically in the browser or Node.js. It runs everything on the main thread using an incremental `tick()` pattern — the same approach as the Unity version. This means Ink external functions work correctly for all predicates (group and individual).
+The JS version of the framework is available as a single unified NPM package that exports correctly whether you are running in the browser or Node.js. It runs everything on the main thread (or event loop) using an incremental `tick()` pattern — identical to the Unity version. This means Ink external functions work correctly for all predicates (group and individual).
 
 ### Installation
 
@@ -293,7 +292,7 @@ npm run map-test  # map-based demo   (tests/map/map-test.ink)
 
 ## Usage: Node.js
 
-The node implementation uses the exact same npm package and `tick()` based pattern as the browser.
+Because the `ink-storylet-framework` package supplies natively resolved ES and CommonJS bindings for both environments via its `package.json` exports, the Node implementation is completely identical to the browser logic.
 
 ```typescript
 import { Story } from 'inkjs';
@@ -396,10 +395,10 @@ storyletManager.MarkPlayed(knotID);
 
 ## Compiling Ink Files
 
-Use the inkjs bundled compiler (do **not** use the separate `inklecate` npm package, which is outdated):
+Generally, utilize the `inkjs` bundled compiler:
 
 ```bash
-node browser/node_modules/inkjs/bin/inkjs-compiler.js your-story.ink -o your-story.ink.json
+npx inkjs-compiler your-story.ink -o your-story.ink.json
 ```
 
 Or use the convenience script from the root to recompile all included Ink files:

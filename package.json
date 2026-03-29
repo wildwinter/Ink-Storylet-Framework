@@ -1,15 +1,50 @@
 {
   "name": "ink-storylet-framework",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "A simple storylet framework for Ink.",
+  "main": "./node/build/cjs/StoryletManager.js",
+  "module": "./node/build/es/StoryletManager.js",
+  "types": "./node/build/es/StoryletManager.d.ts",
+  "exports": {
+    ".": {
+      "node": {
+        "types": "./node/build/es/StoryletManager.d.ts",
+        "import": "./node/build/es/StoryletManager.js",
+        "require": "./node/build/cjs/StoryletManager.js"
+      },
+      "default": {
+        "types": "./browser/build/es/StoryletManager.d.ts",
+        "import": "./browser/build/es/StoryletManager.js",
+        "require": "./browser/build/cjs/StoryletManager.js"
+      }
+    },
+    "./runner": {
+      "node": {
+        "types": "./node/build/es/StoryletRunner.d.ts",
+        "import": "./node/build/es/StoryletRunner.js",
+        "require": "./node/build/cjs/StoryletRunner.js"
+      },
+      "default": {
+        "types": "./browser/build/es/StoryletRunner.d.ts",
+        "import": "./browser/build/es/StoryletRunner.js",
+        "require": "./browser/build/cjs/StoryletRunner.js"
+      }
+    }
+  },
+  "files": [
+    "node/build",
+    "node/src",
+    "browser/build",
+    "browser/src"
+  ],
   "scripts": {
     "build-unity": "cd unity && npm run build",
-    "build-browser": "cd browser && npm version $npm_package_version --no-git-tag-version --allow-same-version && npm run build",
+    "build-browser": "cd browser && npm run build",
     "build-node": "cd node && npm run build",
     "compile-ink": "node browser/node_modules/inkjs/bin/inkjs-compiler.js tests/test1/test.ink -o tests/test1/test.ink.json && node browser/node_modules/inkjs/bin/inkjs-compiler.js tests/map/map-test.ink -o tests/map/map-test.ink.json",
     "build": "npm run build-browser && npm run build-node && npm run build-unity",
     "dist": "npm run build && rm -rf dist/v$npm_package_version && mkdir -p dist/v$npm_package_version && zip -r dist/v$npm_package_version/$npm_package_name-browser-v$npm_package_version.zip ./browser/build && zip -r dist/v$npm_package_version/$npm_package_name-node-v$npm_package_version.zip ./node/build && zip -r dist/v$npm_package_version/$npm_package_name-unity-v$npm_package_version.zip ./unity/build",
-    "publish-npm": "npm run build-browser && cd browser && npm publish"
+    "publish-npm": "npm run build && npm publish"
   },
   "keywords": [
     "ink",
