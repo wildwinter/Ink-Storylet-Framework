@@ -7,7 +7,7 @@ See my medium post - [over here](https://wildwinter.medium.com/an-ink-unity-stor
 There are now two main distributions of the framework:
 
 1. The original Unity version, which can be found in the `unity` directory.
-2. The JS/TS NPM package (`ink-storylet-framework`) which universally supports both Browser and Node.js environments.
+2. The JS/TS NPM package (`@wildwinter/ink-storylet-framework`) which universally supports both Browser and Node.js environments.
 
 ## What is a Storylet System?
 
@@ -177,15 +177,15 @@ The JS version of the framework is available as a single unified NPM package tha
 Ensure you have `inkjs` installed alongside the framework.
 
 ```bash
-npm install inkjs ink-storylet-framework
+npm install inkjs @wildwinter/ink-storylet-framework
 ```
 
 ### Setup
 
 ```typescript
 import { Story } from 'inkjs';
-import { StoryletManager } from 'ink-storylet-framework';
-import { runUntilReady } from 'ink-storylet-framework/runner';
+import { StoryletManager } from '@wildwinter/ink-storylet-framework';
+import { runUntilReady } from '@wildwinter/ink-storylet-framework/runner';
 import storyContent from './your-story.json';
 
 // Initialize Ink Story and bind any external functions before creating the manager
@@ -292,12 +292,12 @@ npm run map-test  # map-based demo   (tests/map/map-test.ink)
 
 ## Usage: Node.js
 
-Because the `ink-storylet-framework` package supplies natively resolved ES and CommonJS bindings for both environments via its `package.json` exports, the Node implementation is completely identical to the browser logic.
+Because the `@wildwinter/ink-storylet-framework` package supplies natively resolved ES and CommonJS bindings for both environments via its `package.json` exports, the Node implementation is completely identical to the browser logic.
 
 ```typescript
 import { Story } from 'inkjs';
-import { StoryletManager } from 'ink-storylet-framework';
-import { runUntilReady } from 'ink-storylet-framework/runner';
+import { StoryletManager } from '@wildwinter/ink-storylet-framework';
+import { runUntilReady } from '@wildwinter/ink-storylet-framework/runner';
 
 const story = new Story(storyContent);
 
